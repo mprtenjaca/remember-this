@@ -120,6 +120,11 @@ year yields at least one note.
 
 ---
 
+> **Swapped later the same day.** Using it, Marko read "Kronologija" as *the order things happen* — which is the
+> reminder view, not the date-written view. So now **Sve** (default) is by date written, the list you scroll to
+> find something, and **Kronologija** is by the reminder's month. Same two views, names the other way round;
+> the "Kad zatreba" section belongs to Kronologija.
+
 ## 5. Motion, sized to what changed
 
 The Sve ⇄ Kronologija switch was first built as a full-screen lime wipe. It looked right on paper and was
