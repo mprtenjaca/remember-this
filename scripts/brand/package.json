@@ -1,0 +1,12 @@
+{
+  "name": "remember-this-brand",
+  "private": true,
+  "type": "module",
+  "description": "Rasterizes the app icon, adaptive icon, splash and favicon from one glyph definition. Kept out of the app's package.json so the RN install stays lean.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

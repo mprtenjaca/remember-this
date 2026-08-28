@@ -1,0 +1,76 @@
+# Real-world notes for the M0 gate (Croatian-first, a few English). Written as people actually type: no diacritics sometimes,
+# relations instead of names, dates in every format, brands, phone numbers. NOW in the harness is 2026-08-25 (Tuesday).
+# Fields: text · expected{intent, triggers (types that MUST be present), needs_anchor} · acceptable_questions (substrings; [] = any question is a miss)
+#         · anchors (already known) · search_query (how you'd look for it 6 months later) · answer (correct option, if an options question is expected)
+# Location-type triggers are dropped by ingest() until geocoding lands (M5), so location notes expect "semantic" only.
+
+# ── birthdays & gifts
+{"text":"Ana želi Dyson fen za rođendan","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":true},"acceptable_questions":["rođendan","datum"],"search_query":"poklon za Anu"}
+{"text":"Ana želi Dyson fen za rođendan","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"anchors":[{"person":"Ana","kind":"birthday","monthDay":"03-14"}],"search_query":"što kupiti Ani"}
+{"text":"Bratu poklon puzle za rodendan 10.6","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"poklon za brata"}
+{"text":"Mami za rođendan 2.11. kupiti onaj šal iz Zare koji je gledala","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"šal mama poklon"}
+{"text":"Marta želi fotoaparat za rođendan, neki Nikon ili Canon","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":true},"acceptable_questions":["rođendan","datum"],"search_query":"fotoaparat za Martu"}
+{"text":"Baka ima rođendan 3.3., voli lavandu i križaljke","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"poklon baka"}
+{"text":"Kumu za rođendan poklon bon za Decathlon","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":true},"acceptable_questions":["rođendan","datum"],"search_query":"poklon kum"}
+{"text":"Filip, Anin dečko, ima rođendan 28.2., voli craft pivo","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Filip poklon pivo"}
+{"text":"Tati se sviđa ona knjiga o Titu koju je vidio kod Pere","expected":{"intent":"gift","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":["prigod","rođendan","kad"],"search_query":"knjiga za tatu"}
+{"text":"Sestri fali dobar ruksak za planinarenje, Deuter ili Osprey","expected":{"intent":"gift","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":["prigod","rođendan","kad"],"search_query":"ruksak sestra poklon"}
+{"text":"Godišnjica braka 14.9., rezervirati onaj restoran na Šalati","expected":{"intent":"task","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"godišnjica restoran"}
+{"text":"Luki za rođendan 19.10 lego tehnic, ima već onaj bager","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"lego Luka"}
+{"text":"Sarah wants a Kindle for her birthday","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":true},"acceptable_questions":["birthday","date"],"search_query":"gift for Sarah"}
+{"text":"Dad's birthday is on Nov 5, he mentioned a good chef's knife","expected":{"intent":"gift","triggers":["semantic","anchor"],"needs_anchor":false},"acceptable_questions":[],"search_query":"dad knife gift"}
+
+# ── recommendations / future needs (people, services, tradesmen)
+{"text":"Ivan preporučio Auto X za servis","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"dobar mehaničar"}
+{"text":"Mehaničar Dario u Sesvetama popravio klimu u autu za 80€, brz i pošten","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"klima auto mehaničar"}
+{"text":"Vulkanizer kod Kauflanda u Dubravi, zimske gume mijenjaju bez najave","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"zimske gume vulkanizer"}
+{"text":"Zubar dr. Kovač, Ilica 120, sljedeći pregled za 6 mjeseci","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"zubar pregled"}
+{"text":"Frizer Luka na Vukovarskoj, šišanje 15€, treba svaka 3 tjedna","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"frizer šišanje"}
+{"text":"Vodoinstalater Mile 091 555 1234, došao isti dan i nije derao","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"vodoinstalater hitno"}
+{"text":"Petar preporučio računovođu Sanju za obrt, ured na Trešnjevci","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"računovođa za obrt"}
+{"text":"Električar Zoran, susjedi hvale, radi i vikendom","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"električar vikend"}
+{"text":"Marko iz Ericssona rekao da na proljeće traže React Native developere","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"posao React Native"}
+{"text":"Klima servis svaki svibanj, ovaj put došao Frigo Zagreb, 60€","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"servis klime stan"}
+{"text":"Dobar krojač za odijela: Boris, Martićeva, treba ga zvati 2 tjedna prije","expected":{"intent":"future_need","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"krojač odijelo"}
+
+# ── places (city / location context — geofence comes in M5, semantic must carry it)
+{"text":"Kad budem u Zagrebu, otići u knjižaru Fraktura na Cvjetnom","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"knjižara Zagreb"}
+{"text":"U Splitu obavezno kafić na Matejuški, pogled na more, kava 2€","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"kafić Split pogled na more"}
+{"text":"Restoran Foša u Zadru — odlična riba, rezervirati terasu","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"restoran Zadar riba"}
+{"text":"Konoba Kod Bracere na Krku, crni rižot, gazda Ive, zatvoreno ponedjeljkom","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"konoba Krk rižot"}
+{"text":"Kafić Quahwa u Teslinoj, najbolji filter kava u Zagrebu","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"dobra kava centar"}
+{"text":"Blizu posla nova pekara Korica, kroasani ujutro rasprodani do 8","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"pekara kroasan"}
+{"text":"Kad idem u Ikeu kupiti police BILLY i one kutije za kablove","expected":{"intent":"task","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Ikea kupiti"}
+{"text":"Vidikovac iznad Omiša, Starigrad Fortica, ići pred zalazak","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"vidikovac Omiš"}
+{"text":"Tom recommended a great Thai place in Vienna, Nam Nam near Naschmarkt","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Thai restaurant Vienna"}
+{"text":"Parking kod bolnice Rebro je besplatan iza zgrade C nakon 16h","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"parking Rebro"}
+
+# ── tasks with time
+{"text":"podsjeti me u 15h nazvati Marka","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"nazvati Marka"}
+{"text":"Sutra u 9 odnijeti paket na poštu","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"paket pošta"}
+{"text":"Za 2 tjedna platiti komunalije","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"komunalije platiti"}
+{"text":"U petak nazvati Peru za vikend","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Pero vikend"}
+{"text":"Podsjeti me 1.9. upisati Luku u vrtić","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"vrtić upis"}
+{"text":"Registracija auta istječe 12.11.","expected":{"intent":"task","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"registracija auta"}
+{"text":"Dimnjačar dolazi u listopadu, ostaviti ključ susjedi Nadi","expected":{"intent":"task","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"dimnjačar ključ"}
+{"text":"Popraviti slavinu u kupaoni, kapa","expected":{"intent":"task","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":["kad"],"search_query":"slavina kapa"}
+{"text":"Kupiti vino za Marijana i Lidiju kad idemo k njima","expected":{"intent":"task","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":["kad"],"search_query":"Marijan Lidija posjet"}
+{"text":"Remind me to renew the passport before summer 2027","expected":{"intent":"task","triggers":["semantic","time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"passport renewal"}
+{"text":"Call the landlord next week about the heating","expected":{"intent":"task","triggers":["time"],"needs_anchor":false},"acceptable_questions":[],"search_query":"landlord heating"}
+
+# ── ideas & recommendations (books, films, travel)
+{"text":"Ideja: app za dijeljenje troškova na putovanju, ali s offline modom","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"ideja za app"}
+{"text":"Pogledati film Perfect Days, preporučio Damir","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"koji film pogledati"}
+{"text":"Knjiga: Ministarstvo vremena, Kaliane Bradley","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"koju knjigu čitati"}
+{"text":"Hotel Adriana na Hvaru, sobe s pogledom, doručak do 11","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"hotel Hvar"}
+{"text":"Plaža Stiniva na Visu, ići rano prije 9 dok nema gužve","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"plaža Vis"}
+{"text":"Let Zagreb–Lisabon je jeftin u listopadu, Ryanair","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Lisabon let"}
+{"text":"Ideja za vikend: Plitvice u jesen, ići preko tjedna kad nema gužve","expected":{"intent":"idea","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Plitvice vikend"}
+
+# ── facts (things you will need to look up)
+{"text":"WiFi lozinka kod bake: Slavonija1950","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"wifi baka"}
+{"text":"Broj police auto osiguranja 4471-22, Croatia osiguranje","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"polica osiguranja auto"}
+{"text":"Lijek za alergiju koji mi je pomogao: Aerius, jedna ujutro","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"lijek alergija"}
+{"text":"Veličina cipela za Luku: 34, tenisice 35","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Luka broj cipela"}
+{"text":"Kolegica Ivana ide na porodiljni u siječnju","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"Ivana porodiljni"}
+{"text":"Boja zida u dnevnoj: Jupol Gold 320, dvije ruke","expected":{"intent":"fact","triggers":["semantic"],"needs_anchor":false},"acceptable_questions":[],"search_query":"boja zida dnevna"}

@@ -1,30 +1,66 @@
 {
   "expo": {
-    "name": "RememberThis",
-    "slug": "RememberThis",
-    "version": "1.0.0",
+    "name": "Remember This",
+    "slug": "remember-this",
+    "scheme": "rememberthis",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mp.rememberthis",
+      "infoPlist": {
+        "NSContactsUsageDescription": "Rođendani iz kontakata smanjuju broj pitanja pri zapisu. Kontakti nikad ne napuštaju uređaj."
+      }
     },
     "android": {
+      "package": "com.mp.rememberthis",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#D7EC7C"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": true,
+      "permissions": [
+        "android.permission.READ_CONTACTS"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-localization",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Rođendani iz kontakata smanjuju broj pitanja pri zapisu. Kontakti nikad ne napuštaju uređaj."
+        }
+      ],
+      "expo-font",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Mikrofon služi za glasovni zapis bilješke. Snimka se prepiše u tekst i ne sprema se."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 240,
+          "resizeMode": "contain",
+          "backgroundColor": "#D7EC7C"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
     }
   }
 }

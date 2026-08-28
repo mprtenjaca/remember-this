@@ -1,0 +1,48 @@
+name = "remember-this-ai"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Setup:
+#   npx wrangler secret put GEMINI_API_KEY     (same key as the burin worker is fine)
+#   npm run deploy
+#   GET https://<worker>/models → verify the models below are callable by this key
+#
+# Optional per-device daily budget — uncomment after `npx wrangler kv namespace create RL`:
+# [[kv_namespaces]]
+# binding = "RL"
+# id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+DAILY_LIMIT = "200"
+# Primary provider for enrich/edit. Switched to Gemini on 2026-08-25: gpt-oss kept misreading intent on
+# device ("nazovi kuma sljedeću srijedu" came back asking for a birthday). Groq stays as the automatic
+# failover and still does Whisper — set ENRICH_PROVIDER="groq" to switch back.
+# Original note: Groq free tier is capped on TOKENS PER DAY (200k), not just requests.
+# History: 120b once stalled on the old ~4 KB system prompt until Cloudflare killed the request, so we dropped to
+# 20b. Both causes are now gone — the prompt is ~24 % smaller (time moved into temporal.ts) and every upstream call
+# has a 20 s deadline, so a slow provider fails over instead of hanging. Back on 120b for the better intent calls;
+# switch to "openai/gpt-oss-20b" here if the daily token budget starts running out mid-afternoon.
+# Falls back to Gemini automatically on 429/5xx (and when GROQ_API_KEY is not set). Embeddings are always Gemini.
+ENRICH_PROVIDER = "gemini"
+GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_WHISPER = "whisper-large-v3-turbo"
+# gpt-oss reasoning depth. "low" was right when the system prompt was ~4 KB of date rules; now that time parsing
+# lives in temporal.ts the model only does judgement (intent boundaries), which is what thinking actually helps.
+GROQ_REASONING = "medium"
+# Model order = best first, with quota deciding what can actually BE first. Measured on this key (2026-08-25):
+#   3.5-flash        7 RPM /  20 RPD  ← the better model, but 20 requests A DAY makes it a fallback, not a primary
+#   3.5-flash-lite  15 RPM / 500 RPD  ← the workhorse
+#   3.1-flash-lite  15 RPM / 500 RPD  ← same quota, older generation: another 500 once the 3.5 pool is gone
+# So: lite carries the day, flash catches the overflow with the better reasoning, Groq 120b catches the rest.
+# Quality of the FINAL result is enforced by reconcile() and temporal.ts regardless of which model answered.
+ENRICH_MODEL = "gemini-3.5-flash-lite"
+FALLBACK_MODEL = "gemini-3.5-flash"
+EMBED_MODEL = "gemini-embedding-001"
+# Voice. Whisper only, for now. gemini-3.5-transcribe rejects our request shape with 400 (it is a Live-API
+# style model, not a plain generateContent one), so every voice note paid for one dead Gemini call before
+# falling through. It is only 3 RPM / 25 RPD anyway. Set this to "gemini-3.5-transcribe" to try it again
+# once the body shape is adapted; the worker falls back to Whisper on any failure either way.
+GEMINI_TRANSCRIBE = ""
+
+[observability]
+enabled = true

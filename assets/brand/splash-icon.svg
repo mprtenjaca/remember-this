@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="640" viewBox="0 0 1024 640">
+  <g transform="translate(388.79999999999995 126.61333333333332) scale(3.8500000000000005)">
+    <g fill="#14160E">
+      <path d="M32 3v5 M16.5 10.5l3.4 3.4 M47.5 10.5l-3.4 3.4" stroke="#14160E" stroke-width="4.2" stroke-linecap="round" fill="none"/>
+      <circle cx="32" cy="27" r="13"/>
+      <path d="M25.6 38.6h12.8l-1.8 8.6H27.4z"/>
+      <rect x="26.4" y="50" width="11.2" height="4.4" rx="2.2"/>
+      <rect x="28.4" y="56.4" width="7.2" height="4.4" rx="2.2"/>
+      
+    </g></g>
+  <text x="512" y="513.3866666666667" text-anchor="middle" font-family="Manrope" font-weight="700" font-size="112" letter-spacing="-3.36" fill="#14160E">Remember This</text>
+</svg>

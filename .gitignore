@@ -39,3 +39,15 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# env
+.env
+.env.*
+!.env.example
+
+# harness output
+p0-harness/report.md
+
+# wrangler
+worker/.wrangler/
+worker/.dev.vars
