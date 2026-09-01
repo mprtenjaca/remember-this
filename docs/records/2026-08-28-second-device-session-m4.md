@@ -116,7 +116,23 @@ touches a native module. Expo Go keeps the mock (`inExpoGo`).
 - Tap opens the note, including from a cold start. Every launch rebuilds the OS queue from the DB (hard rule 2).
 - The debug timeline gained "Test obavijest (10 s)" — the one thing no unit test can answer.
 
-**Nothing has been seen deliver.** That needs `npm run build:dev`.
+**Nothing has been seen deliver.** That needs the dev build.
+
+### The build itself
+
+Validated locally first, so the free tier's build quota was not spent on a config error: `npx expo prebuild
+--platform android` (iOS prebuild needs macOS, but the plugins are the same) put `notification_icon.png` in all
+five densities, `ding.wav` in `res/raw`, `#D7EC7C` in colors.xml and the `reminders-v1` channel in the manifest;
+`npx expo export --platform ios` bundled 5 MB with no import errors. The generated `android/` folder was deleted
+afterwards — it is gitignored, and prebuild had also rewritten the `android`/`ios` npm scripts to `expo run:*`,
+which had to be put back (we build through EAS).
+
+Then `npx eas build --profile development --platform ios`. EAS added `expo-dev-client` (how the installed app
+attaches to Metro) and, with it, `expo-updates` + `runtimeVersion` + an `updates.url`; it also duplicated and
+padded `android.permissions`, which was trimmed back to what the app uses. Two things worth remembering: the
+encryption question is answered **yes** (standard/exempt — HTTPS only; revisit at M6's E2E encryption), and the
+`development` EAS environment has **no env vars**, so a build launched without Metro has no proxy URL and runs
+offline on the heuristic. Connected to `npm start` it reads the local `.env`.
 
 ---
 

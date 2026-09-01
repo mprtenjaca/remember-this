@@ -12,7 +12,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.mp.rememberthis",
       "infoPlist": {
-        "NSContactsUsageDescription": "Rođendani iz kontakata smanjuju broj pitanja pri zapisu. Kontakti nikad ne napuštaju uređaj."
+        "NSContactsUsageDescription": "Rođendani iz kontakata smanjuju broj pitanja pri zapisu. Kontakti nikad ne napuštaju uređaj.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -26,9 +27,7 @@
       "permissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.WRITE_CONTACTS",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -83,6 +82,12 @@
         "projectId": "c63bb827-613a-4127-8699-af81ba9aa9c6"
       }
     },
-    "owner": "mprtenja"
+    "owner": "mprtenja",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c63bb827-613a-4127-8699-af81ba9aa9c6"
+    }
   }
 }
