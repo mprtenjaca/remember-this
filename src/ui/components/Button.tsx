@@ -27,7 +27,7 @@ export function Button({ title, onPress, variant: variantProp = 'glass', size = 
   const variant: Exclude<Variant, 'soft'> = variantProp === 'soft' ? 'glass' : variantProp;
   const fg = variant === 'primary' ? t.c.onAccent : variant === 'danger' ? t.c.danger : variant === 'ghost' ? t.c.ion : t.c.fg;
   const bg = variant === 'glass' ? t.c.glass : variant === 'signal' ? t.c.signalSoft : 'transparent';
-  const border = variant === 'glass' ? t.c.glassBorder : variant === 'signal' ? 'rgba(245,178,61,0.35)' : 'transparent';
+  const border = variant === 'glass' ? t.c.glassBorder : variant === 'signal' ? t.c.signalBorder : 'transparent';
   const h = size === 'sm' ? 38 : 48;
   // An icon adds its own visual weight on the left, so the pill's leading padding tightens to keep the
   // icon+label pair optically centred instead of sitting right of centre.

@@ -67,7 +67,7 @@ describe('heuristicEnrich → ingest (the three canonical notes)', () => {
     const out = ingest(raw, ictx);
     expect(out.status).toBe('needs_input');
     expect(out.questions).toHaveLength(1);
-    expect(out.questions[0]!.text).toBe('Kad je rođendan — Ana?');
+    expect(out.questions[0]!.text).toBe('Kad je rođendan?');
     expect(out.drafts.map((d) => d.type).sort()).toEqual(['anchor', 'anchor', 'anchor', 'semantic']);
     expect(out.keywords).toEqual(expect.arrayContaining(['poklon', 'fen', 'dyson', 'rođendan']));
   });
@@ -150,7 +150,7 @@ describe('real-world misses from device testing', () => {
     expect(raw.needs_anchor).toEqual({ person: 'Marta', kind: 'birthday' });
     expect(raw.summary).toBe('Marta: Fotoaparat');
     const out = ingest(raw, ictx);
-    expect(out.questions.map((q) => q.text)).toEqual(['Kad je rođendan — Marta?']);
+    expect(out.questions.map((q) => q.text)).toEqual(['Kad je rođendan?']);
   });
 
   it('extractExplicitDate handles 10.6 / 10.6. / 10.06.2027 / 6/10 and skips "u 10.30"', () => {

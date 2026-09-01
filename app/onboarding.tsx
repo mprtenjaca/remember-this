@@ -207,7 +207,7 @@ const AskingCard = React.memo(function AskingCard({ note, question, active }: { 
             </Display>
             <View style={styles.chips}>
               <Chip label={hr ? 'Odaberi datum' : 'Pick a date'} icon="calendar-outline" selected />
-              <Chip label={hr ? 'Samo zapamti' : 'Just remember'} />
+              <Chip label={hr ? 'Bez podsjetnika' : 'No reminder'} />
             </View>
           </Animated.View>
         ) : (

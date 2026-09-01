@@ -146,7 +146,8 @@ describe('ingest — hard rules', () => {
     };
     const out = ingest(r, ctx());
     expect(out.drafts.filter((d) => d.type === 'time')).toHaveLength(2);
-    expect(out.questions.map((q) => q.id)).toEqual(['q2', 'q3']);
+    // 'q3' ("Kome?") is a WHO question — never asked since 2026-08-28, so the cap keeps q2 and q4.
+    expect(out.questions.map((q) => q.id)).toEqual(['q2', 'q4']);
   });
 
   it('past one-off date moves to next year; always has a semantic trigger', () => {
@@ -240,8 +241,8 @@ describe('ingest — questions the model asks without giving us anything to bind
 
 describe('helpers', () => {
   it('the date question never inflects the name', () => {
-    expect(anchorQuestion('Ana', 'birthday', 'hr')).toBe('Kad je rođendan — Ana?');
-    expect(anchorQuestion('Marti', 'birthday', 'hr')).toBe('Kad je rođendan — Marti?');
+    expect(anchorQuestion('Ana', 'birthday', 'hr')).toBe('Kad je rođendan?');
+    expect(anchorQuestion('Marti', 'birthday', 'hr')).toBe('Kad je rođendan?');
     expect(anchorQuestion('Sarah', 'birthday', 'en')).toBe("When is Sarah's birthday?");
   });
   it('clampSummary to 8 words', () => {

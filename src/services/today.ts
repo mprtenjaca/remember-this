@@ -12,13 +12,15 @@ import { planSurfacings, dueInWindow } from '@/domain/triggers/evaluate';
 import { resolveAnchorTrigger } from '@/domain/triggers/resolve';
 import { adjustThreshold, THRESHOLD } from '@/domain/triggers/scoring';
 import { endOfDay, startOfDay } from '@/domain/dates';
+import { RECENT_WINDOW_MS } from '@/domain/recentNotes';
+import { faceOf } from '@/domain/herald';
 import { newId } from '@/lib/ids';
 import { notifyChange } from '@/lib/events';
 import type { Anchor, Reaction, Surfacing, Trigger } from '@/domain/types';
 import { notificationCopy } from './scheduling/refill';
 import { uiLang } from '@/ui/theme/locale';
 import { applyMutations } from '@/db/applyMutations';
-import { playDing } from '@/services/sound';
+import { setReminderDone } from '@/services/noteActions';
 
 /**
  * How far "Dolazi" looks ahead. Three years, because yearly anchors (birthdays, anniversaries, memorials)
@@ -37,8 +39,18 @@ export interface SurfacedItem {
 }
 
 export interface UpcomingItem {
+  /** The note's face in the list — the event itself when the soonest reminder was only its "sat prije" herald. */
   trigger: Trigger;
   note: NoteWithQuestions;
+  anchor: Anchor | null;
+  /** When the hour-before herald fires, if this face has one (domain/herald.ts). */
+  heraldAt: number | null;
+}
+
+/** A note written in the last day, with what the app did with it — the "Novo" section. */
+export interface RecentItem {
+  note: NoteWithQuestions;
+  next: Trigger | null;
   anchor: Anchor | null;
 }
 
@@ -50,6 +62,11 @@ export interface TodayData {
   /** Notes the enricher is still working on — the Today screen shows the reading animation for these. */
   reading: NoteWithQuestions[];
   upcoming: UpcomingItem[];
+  /**
+   * Written in the last RECENT_WINDOW_MS, newest first, not yet capped or de-duplicated against the cards —
+   * the screen does that with pickRecent(), because only it knows which reading cards are still being held.
+   */
+  recent: RecentItem[];
   totalNotes: number;
 }
 
@@ -113,16 +130,29 @@ export async function loadToday(): Promise<TodayData> {
   const upTrig = await triggersRepo.upcoming(d, now, startOfDay(now) + UPCOMING_HORIZON_DAYS * DAY_MS, 120);
   const noteMap = new Map((await notesRepo.byIds(d, Array.from(new Set(upTrig.map((t) => t.noteId))))).map((n) => [n.id, n]));
   const anchorMap = new Map((await anchorsRepo.byIds(d, Array.from(new Set(upTrig.map((t) => t.anchorId).filter((x): x is string => !!x))))).map((a) => [a.id, a]));
+  // One row per note. Its face is the soonest reminder — unless that is only the "sat prije" herald of a moment
+  // an hour later, in which case the moment fronts the row and the herald goes into the subtitle (faceOf).
   const upcoming: UpcomingItem[] = [];
   const seenNotes = new Set<string>();
   for (const t of upTrig) {
     const note = noteMap.get(t.noteId);
     if (!note || note.archived || seenNotes.has(note.id)) continue;
     seenNotes.add(note.id);
-    upcoming.push({ trigger: t, note, anchor: t.anchorId ? anchorMap.get(t.anchorId) ?? null : null });
+    const face = faceOf(upTrig.filter((x) => x.noteId === note.id));
+    const trigger = face?.trigger ?? t;
+    upcoming.push({ trigger, note, anchor: trigger.anchorId ? anchorMap.get(trigger.anchorId) ?? null : null, heraldAt: face?.heraldAt ?? null });
   }
 
-  return { now, surfaced, clarify, failed, reading, upcoming, totalNotes: await notesRepo.count(d) };
+  // 5. "Novo" — what was written in the last day, so a fresh note leaves a trace on Today even when it has no
+  // question and no reminder soon. Its next reminder comes from the same `upcoming` pass (one per note).
+  const recent: RecentItem[] = (await notesRepo.listActive(d, 20))
+    .filter((n) => n.createdAt >= now - RECENT_WINDOW_MS && n.createdAt <= now)
+    .map((n) => {
+      const u = upcoming.find((x) => x.note.id === n.id);
+      return { note: n, next: u?.trigger ?? null, anchor: u?.anchor ?? null };
+    });
+
+  return { now, surfaced, clarify, failed, reading, upcoming, recent, totalNotes: await notesRepo.count(d) };
 }
 
 /** 👍 / "ne sad" / 👎 / done → surfacing.reaction + adaptive threshold + side effects. */
@@ -137,12 +167,10 @@ export async function react(surfacingId: string, reaction: Reaction) {
   await prefsRepo.set(d, PREF.thresholdSemantic, String(adjustThreshold(cur, reaction)), now, true);
 
   if (reaction === 'done' && s.triggerId) {
-    // "Kupljeno ✓" → cancel the rest of the chain, archive the note
-    playDing();
-    const triggers = await triggersRepo.byNote(d, s.noteId);
-    const rest = triggers.filter((t) => t.state === 'active' && t.type !== 'semantic');
-    if (rest.length) await applyMutations(s.noteId, rest.map((t) => ({ op: 'set_state' as const, triggerId: t.id, state: 'done' as const })), 'manual');
-    await notesRepo.setArchived(d, s.noteId, true, now);
+    // "Riješeno" on the card resolves THIS reminder only — the same tick as in the note's own list. It used to
+    // close the whole chain and archive the note, which surprised Marko ("sat prije" done ≠ birthday done). The
+    // note still follows on its own when this was the last reminder open (setReminderDone → afterTriggerDone).
+    await setReminderDone(s.noteId, s.triggerId);
   }
   if (reaction === 'not_now' && s.triggerId) {
     const t = await triggersRepo.byId(d, s.triggerId);

@@ -58,8 +58,10 @@ export default function TimelineScreen() {
   const insets = useSafeAreaInsets();
   const [showDone, setShowDone] = useState(false);
   const [kindFilter, setKindFilter] = useState<TimelineKind>('all');
-  // false = grouped by when the reminder fires; true = by when the note was written (the archive question).
-  const [byCreation, setByCreation] = useState(false);
+  // true = "Sve": by when the note was written (the default — the list you scroll to find something);
+  // false = "Kronologija": by when the reminder fires (what is coming, in order). Swapped 2026-08-28 on Marko's
+  // note that a CHRONOLOGY should be the order things happen, not the order they were typed.
+  const [byCreation, setByCreation] = useState(true);
 
   // Switching rebuilds every heading and row at once, which is a jarring thing to watch. A circle of accent
   // colour grows out of the button, and the swap happens while it covers the screen.
@@ -154,7 +156,7 @@ export default function TimelineScreen() {
                   third rack of controls on a screen whose point is the list. */}
               <View style={styles.titleRow}>
                 <Display size="xxl" weight="bold" style={{ flex: 1 }}>
-                  {showDone ? (hr ? 'Riješeno' : 'Done') : byCreation ? (hr ? 'Kronologija' : 'Timeline') : hr ? 'Sve' : 'All'}
+                  {showDone ? (hr ? 'Riješeno' : 'Done') : byCreation ? (hr ? 'Sve' : 'All') : hr ? 'Kronologija' : 'Timeline'}
                 </Display>
                 {/* The icon shows the view you are IN, matching the title beside it: a list for "Sve", a
                     clock for the chronology. An icon showing the destination instead reads as a contradiction
@@ -163,15 +165,21 @@ export default function TimelineScreen() {
                   <Pressable
                     onPress={switchView}
                     accessibilityRole="button"
-                    accessibilityLabel={byCreation ? (hr ? 'Prikaži sve' : 'Show all') : hr ? 'Prikaži kronologiju' : 'Show the timeline'}
+                    accessibilityLabel={byCreation ? (hr ? 'Prikaži kronologiju' : 'Show the timeline') : hr ? 'Prikaži sve' : 'Show all'}
                     style={({ pressed }) => [styles.viewBtn, { borderColor: t.c.glassBorder, backgroundColor: t.c.glass, opacity: pressed ? 0.7 : 1 }]}
                   >
-                    <FlipIcon name={byCreation ? 'time-outline' : 'layers-outline'} />
+                    <FlipIcon name={byCreation ? 'layers-outline' : 'time-outline'} />
                   </Pressable>
                 ) : null}
               </View>
+              {/* The count line also says HOW the list is ordered: the icon alone did not tell a first-time user
+                  that a second view exists, and the tab still reads "Sve" while the title reads "Kronologija". */}
               <Mono tone="muted" style={{ marginTop: S.xs }}>
-                {data ? (hr ? countHr(notes.length) : `${notes.length} note${notes.length === 1 ? '' : 's'}`) : ''}
+                {data
+                  ? `${hr ? countHr(notes.length) : `${notes.length} note${notes.length === 1 ? '' : 's'}`}${
+                      showDone ? '' : ` · ${byCreation ? (hr ? 'po datumu zapisa' : 'by date written') : hr ? 'po podsjetniku' : 'by reminder'}`
+                    }`
+                  : ''}
               </Mono>
               {/* Completed notes are archived, not deleted — this is how you get back to them. */}
               <View style={styles.filters}>

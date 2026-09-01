@@ -24,7 +24,15 @@ import { deleteDraft, listDrafts } from '@/services/drafts';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { endOfDay, fmtDate, fmtDayMonth, fmtMonthAbbr, fmtRelative, fmtTime, weekdayName } from '@/domain/dates';
 import { groupUpcoming } from '@/domain/upcomingGroups';
+import { pickRecent } from '@/domain/recentNotes';
 import type { Reaction } from '@/domain/types';
+
+/**
+ * "Novo" is parked (Marko, 2026-08-28): with the "Zapisano" card and "Sve" ordered by date written, the section
+ * earned its place only for "kad zatreba" notes — and even narrowed to those it read as one block too many.
+ * The code stays wired (recentItems, today.recent) so it can be switched back on in one place.
+ */
+const SHOW_NOVO = false;
 
 export default function TodayScreen() {
   const t = useTheme();
@@ -50,8 +58,22 @@ export default function TodayScreen() {
   const laterItems = (data?.upcoming ?? []).filter((u) => u.trigger.fireAt! > endOfDay(now));
   // The horizon runs years out, so the list carries its own headings: this month → month name → year.
   const laterGroups = groupUpcoming(laterItems, (u) => u.trigger.fireAt!, now, hr ? 'hr' : 'en');
+  // "Novo": the last day's notes that have NO other place on this screen — no card of their own (question, held
+  // reading card, failure) and no reminder in "Danas još"/"Dolazi". In practice: the "kad zatreba" notes you just
+  // wrote, which would otherwise vanish without a trace. A note is never shown twice on Today (Marko, 2026-08-28:
+  // the first version duplicated dated notes and read as clutter).
+  const recentItems = data
+    ? pickRecent(
+        data.recent.map((r) => ({ id: r.note.id, createdAt: r.note.createdAt, item: r })),
+        {
+          now,
+          excludeIds: [...data.clarify.map((n) => n.id), ...data.failed.map((n) => n.id), ...readingIds, ...data.upcoming.map((u) => u.note.id)],
+        },
+      ).map((x) => x.item)
+    : [];
   const quiet = data && data.surfaced.length === 0 && data.clarify.length === 0 && data.failed.length === 0;
-  const empty = quiet && todayItems.length === 0;
+  // "Danas ništa" next to a fresh note would contradict it — Novo counts as something on the screen.
+  const empty = quiet && todayItems.length === 0 && !(SHOW_NOVO && recentItems.length > 0);
 
   return (
     <>
@@ -137,7 +159,7 @@ export default function TodayScreen() {
             <Glass radius={R.xl} borderColor={t.c.danger}>
               <View style={styles.failed}>
                 <Body tone="fg2" size="sm">
-                  {hr ? 'Nisam uspio pročitati ovu bilješku. Spremljena je.' : 'I could not read this note. It is saved.'}
+                  {hr ? 'Nisam uspio pročitati ovu bilješku. Zapisana je.' : 'I could not read this note. It is written down.'}
                 </Body>
                 <Display size="lg" weight="semi" style={{ marginTop: S.xs }}>
                   {n.rawText}
@@ -148,6 +170,9 @@ export default function TodayScreen() {
           </View>
         ))}
 
+        {/* Novo — the trace of what you just wrote. Reads differently from "Dolazi" on purpose: no date column,
+            a lime dot for "fresh", and the second line says what the app DID with it (a date and a label, or
+            "kad zatreba") in the accent tone. "Dolazi" answers when; this answers "did it land, and where". */}
         {quiet && todayItems.length > 0 ? (
           <View style={styles.block}>
             <Glass radius={R.xl}>
@@ -179,10 +204,12 @@ export default function TodayScreen() {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Body numberOfLines={2}>{u.note.summary ?? u.note.rawText}</Body>
-                      {u.trigger.label ? (
+                      {/* The time column is the EVENT; a same-day herald is said here, not fronted ("19:00 rođendan"
+                          read as a birthday at seven). */}
+                      {u.heraldAt || u.trigger.label ? (
                         <Mono tone="muted" size="xs" numberOfLines={1}>
                           {u.anchor ? `${u.anchor.label} · ` : ''}
-                          {u.trigger.label}
+                          {u.heraldAt ? (hr ? `sat prije u ${fmtTime(u.heraldAt)}` : `an hour before, at ${fmtTime(u.heraldAt)}`) : u.trigger.label}
                         </Mono>
                       ) : null}
                     </View>
@@ -190,6 +217,54 @@ export default function TodayScreen() {
                   </Pressable>
                   </SwipeToDelete>
                 ))}
+              </View>
+            </Glass>
+          </View>
+        ) : null}
+
+        {SHOW_NOVO && recentItems.length > 0 ? (
+          <View style={styles.block}>
+            {/* A CARD, like "Danas još": cards are for what is today (fresh, or due), the plain list below is for
+                what comes later. A flat section here was tried and read worse next to "Dolazi" (Marko). */}
+            <Glass radius={R.xl}>
+              <View style={styles.todayCard}>
+                <View style={styles.head}>
+                  <View style={[styles.badge, { backgroundColor: t.c.accentSoft }]}>
+                    <View style={[styles.dot, { backgroundColor: t.c.accent }]} />
+                  </View>
+                  <Label tone="ion">{hr ? 'Novo' : 'New'}</Label>
+                </View>
+                {recentItems.map((r, i) => {
+                  const what = r.next?.fireAt
+                    ? `${fmtDayMonth(r.next.fireAt)}${r.anchor ? ` · ${r.anchor.label}` : ''}${r.next.label ? ` · ${r.next.label}` : ''}`
+                    : hr
+                      ? 'kad zatreba'
+                      : 'when needed';
+                  return (
+                    <SwipeToDelete
+                      key={r.note.id}
+                      onDelete={() => confirmDeleteNote(r.note.id, r.note.summary ?? r.note.rawText)}
+                      onLongPress={() => openNoteMenu({ noteId: r.note.id, summary: r.note.summary ?? r.note.rawText, archived: r.note.archived })}
+                    >
+                      <Pressable
+                        onPress={() => router.push({ pathname: '/note/[id]', params: { id: r.note.id } })}
+                        accessibilityRole="button"
+                        style={({ pressed }) => [styles.todayRow, i === recentItems.length - 1 ? { borderBottomWidth: 0 } : { borderBottomColor: t.c.hairline }, { opacity: pressed ? 0.7 : 1 }]}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Body numberOfLines={2}>{r.note.summary ?? r.note.rawText}</Body>
+                          <Mono tone={r.next?.fireAt ? 'ion' : 'muted'} size="xs" numberOfLines={1}>
+                            {what}
+                          </Mono>
+                        </View>
+                        <Mono tone="muted" size="xs" numberOfLines={1}>
+                          {fmtRelative(r.note.createdAt, now, hr ? 'hr' : 'en')}
+                        </Mono>
+                        <Ionicons name="chevron-forward" size={16} color={t.c.muted} />
+                      </Pressable>
+                    </SwipeToDelete>
+                  );
+                })}
               </View>
             </Glass>
           </View>
@@ -288,9 +363,11 @@ const styles = StyleSheet.create({
   block: { marginBottom: S.md },
   failed: { padding: S.lg },
   draftRow: { flexDirection: 'row', alignItems: 'center', gap: S.md, paddingHorizontal: S.lg, paddingVertical: S.md },
+  // Cards for what is TODAY (Novo, Danas još); the plain "Dolazi" list below is for what comes later.
   todayCard: { paddingHorizontal: S.lg, paddingTop: S.lg, paddingBottom: S.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.sm },
   badge: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
   todayRow: { flexDirection: 'row', alignItems: 'center', gap: S.md, paddingVertical: S.md, borderBottomWidth: StyleSheet.hairlineWidth },
   todayTime: { width: 64 },
   draftIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },

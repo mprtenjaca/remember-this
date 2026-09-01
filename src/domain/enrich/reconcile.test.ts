@@ -40,7 +40,7 @@ describe('E1 — gift + person + no occasion word + no date → birthday questio
     const rec = reconcile(raw, 'Uzeti majci poklon', rctx());
     const out = ingest(rec, ictx());
     expect(out.status).toBe('needs_input');
-    expect(out.questions[0]!.text).toBe('Kad je rođendan — Mama?');
+    expect(out.questions[0]!.text).toBe('Kad je rođendan?');
   });
 });
 
@@ -166,7 +166,7 @@ describe('E13 — brands mentioned alongside a person are not mistaken for the p
     const rec = reconcile(raw, 'Marta želi fotoaparat za rođendan, neki Nikon ili Canon', rctx());
     expect(rec.entities?.people).toEqual(['Marta']);
     const out = ingest(rec, ictx());
-    expect(out.questions[0]!.text).toBe('Kad je rođendan — Marta?');
+    expect(out.questions[0]!.text).toBe('Kad je rođendan?');
   });
 });
 

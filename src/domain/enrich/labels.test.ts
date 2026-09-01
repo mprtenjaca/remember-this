@@ -14,13 +14,13 @@ describe('names are never inflected', () => {
   it('the date question names the person without declension', () => {
     for (const n of names) {
       const q = anchorQuestion(n, 'birthday', 'hr');
-      expect(q, `question for ${n}`).toBe(`Kad je rođendan — ${n}?`);
+      expect(q, `question for ${n}`).toBe(`Kad je rođendan?`);
       expect(q).not.toMatch(/ov rođendan|in rođendan/);
     }
   });
 
   it('the anniversary question reads the same way', () => {
-    expect(anchorQuestion('Marti', 'anniversary', 'hr')).toBe('Kad je godišnjica — Marti?');
+    expect(anchorQuestion('Marti', 'anniversary', 'hr')).toBe('Kad je godišnjica?');
   });
 
   it('a wedding anniversary still has its own wording', () => {

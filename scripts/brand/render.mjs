@@ -95,6 +95,19 @@ function splashSvg() {
 </svg>`;
 }
 
+/**
+ * Android notification icon: 96², WHITE glyph on transparent. Android masks this to a silhouette — any colour is
+ * discarded and anything non-transparent becomes solid white, so the filament dot must be a real hole, not a
+ * painted circle, or the bulb turns into a blob in the status bar.
+ */
+function notificationSvg() {
+  const S = 96;
+  const safe = S * 0.75; // Android insets the icon itself; leave it room
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">
+  ${placed('#FFFFFF', 'none', safe, S / 2, S / 2)}
+</svg>`;
+}
+
 /** Web favicon: the icon, with the corner radius the OS would otherwise apply. */
 function faviconSvg() {
   const S = 64;
@@ -117,6 +130,7 @@ const jobs = [
   { name: 'adaptive-icon', svg: adaptiveSvg(), png: 'adaptive-icon.png', width: 1024 },
   { name: 'splash-icon', svg: splashSvg(), png: 'splash-icon.png', width: 1024 },
   { name: 'favicon', svg: faviconSvg(), png: 'favicon.png', width: 64 },
+  { name: 'notification-icon', svg: notificationSvg(), png: 'notification-icon.png', width: 96 },
 ];
 
 mkdirSync(brandDir, { recursive: true });

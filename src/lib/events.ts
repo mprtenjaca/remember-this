@@ -29,6 +29,17 @@ export type DbEvents = {
 
 export const dbEvents = new Emitter<DbEvents>();
 
+/** UI-level: a note was just filed by the capture sheet. The tabs layout shows the "Zapisano" bar for it. */
+export type CaptureEvents = {
+  /**
+   * `text` is what was typed — the bar shows it because the enricher has not titled the note yet.
+   * `kind` 'answered': a clarify question was answered; the card shows again, but only if the first one is gone.
+   */
+  saved: { id: string; text: string; kind?: 'saved' | 'answered' };
+};
+
+export const captureEvents = new Emitter<CaptureEvents>();
+
 let pending: Set<string> | null = null;
 
 /** Coalesce many writes in one tick into a single 'change' event. */

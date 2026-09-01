@@ -57,6 +57,10 @@ const MAX_LOW_CERTAINTY = 2;
 const MAX_QUESTIONS = 2;
 const LEAD_TIME_QUESTION = /koliko\s+(dana|tjedana|unaprijed|prije)|lead\s*time|how\s+(early|far|long)\s+(before|in advance)|unaprijed/i;
 const WHEN_QUESTION = /\b(kad|kada|when|koji\s+dan|which\s+day|u\s+koliko|what\s+time|koje\s+vrijeme|koji\s+datum|what\s+date)\b/i;
+// Marko, 2026-08-28: the app never asks WHO a person is. An options answer becomes a keyword and moves no
+// reminder, so "Čiji je rođendan?" was a tap with no effect — and the day-of reminder never needed the name.
+// No `\b` here: it is an ASCII boundary, so `\bčiji` never matches (č is not \w). Explicit edges instead.
+const WHO_QUESTION = /(?:^|[^\p{L}])(čiji|čija|čije|ciji|cija|cije|za\s+koga|kome|komu|tko|who|whose|for\s+whom)(?![\p{L}])/iu;
 
 const FALLBACK_MONTHS: Record<string, number> = {
   auto_servis: 6,
@@ -342,6 +346,7 @@ export function ingest(raw: EnrichResult, ctx: IngestContext): IngestOutput {
   const hasRealTime = drafts.some((d) => (d.type === 'time' && d.certainty >= 0.6) || (d.type === 'anchor' && d.anchorId));
   const questions = (raw.questions ?? [])
     .filter((q) => !LEAD_TIME_QUESTION.test(q.text))
+    .filter((q) => !WHO_QUESTION.test(q.text))
     .filter((q) => !(q.kind === 'options' && hasRealTime && WHEN_QUESTION.test(q.text)))
     .filter((q) => !(q.kind === 'date' && (anchorRef?.anchor || inferredAnchor || !needsAnchor)))
     .filter((q) => q.kind === 'date' || (q.options?.length ?? 0) >= 2)
@@ -397,7 +402,7 @@ export function clampSummary(s: string, maxWords = 8): string {
 
 
 /**
- * The one place the date question is worded. Croatian never inflects the name — "Kad je rođendan — Marti?" —
+ * The one place the date question is worded. Croatian never inflects the name — it asks "Kad je rođendan?" with no name at all —
  * because approximating the possessive produced "Martiov rođendan" on the device (and would produce "Lukin",
  * "Nikolin"). See src/domain/enrich/labels.ts for the decision.
  */

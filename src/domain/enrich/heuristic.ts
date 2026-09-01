@@ -7,7 +7,7 @@ import type { Anchor, AnchorKind, EnrichResult, EnrichTrigger, Intent, Language 
 import { findAnchor, MARRIAGE_PERSON } from './ingest';
 import { formatMonthDay } from '../triggers/resolve';
 import { findKnownDate } from './knownDates';
-import { parseTemporal } from './temporal';
+import { parseTemporal, resolveSignal } from './temporal';
 import { offsetLabel } from '../triggers/resolve';
 
 export interface HeuristicContext {
@@ -312,6 +312,41 @@ const RELATIONS: Record<string, string> = {
 /** A capitalised word after these is a brand/option, not a person ("neki Nikon ili Canon"). */
 const NON_PERSON_PRECEDERS = new Set(['neki', 'neka', 'neko', 'nekog', 'nekakav', 'ili', 'or', 'some', 'a', 'an', 'the', 'marke', 'brand', 'model']);
 
+/**
+ * The day an occasion in the note falls on — explicit ("rođendan 5.9.", "treći petog") OR relative but still a
+ * specific day ("u subotu", "sutra", "za 2 tjedna", "prva srida u misecu"), resolved against `now`.
+ *
+ * Hard rule 12 says a date written in the note always wins; "u subotu" is such a date. Without this, "Branki je
+ * rođendan u subotu" asked for the date and dropped the Saturday (device, 2026-08-28). Month- and year-sized
+ * offsets ("za 3 mjeseca") stay out: they land on a day, but nobody means that day — better to ask than to
+ * pin a birthday to an arithmetic accident.
+ */
+export function statedOccasionDate(text: string, now: number): { month: number; day: number; year: number | null } | null {
+  const explicit = extractExplicitDate(text);
+  if (explicit) return explicit;
+  const s = parseTemporal(text, now)[0];
+  if (!s) return null;
+  const daySpecific =
+    s.type === 'weekday' ||
+    s.type === 'nth_weekday' ||
+    (s.type === 'relative' && !s.approximate && (s.days != null || s.weeks != null) && s.months == null && s.years == null);
+  if (!daySpecific) return null;
+  // A relative DAY is counted on the calendar, not through resolveSignal(): that rolls "danas" to tomorrow once
+  // the default hour has passed — right for a reminder, wrong for the date of the occasion ("rođendan danas" at
+  // noon is today's birthday, whatever time the reminder ends up at).
+  let at: number | null | undefined;
+  if (s.type === 'relative') {
+    const d = new Date(now);
+    d.setDate(d.getDate() + (s.days ?? 0) + (s.weeks ?? 0) * 7);
+    at = d.getTime();
+  } else {
+    at = resolveSignal(s, now)?.fireAt;
+  }
+  if (at == null) return null;
+  const d = new Date(at);
+  return { month: d.getMonth() + 1, day: d.getDate(), year: null };
+}
+
 /** "10.6", "10.6.", "10.06.2027", "6/10" (d/m) → month/day. Times like "u 10.30" are excluded. */
 export function extractExplicitDate(text: string): { month: number; day: number; year: number | null } | null {
   const re = /(?:^|[\s(])(\d{1,2})[./](\d{1,2})\.?(?:\s?(\d{4}))?(?=$|[\s,.;!?)])/g;
@@ -607,7 +642,8 @@ export function heuristicEnrich(text: string, ctx: HeuristicContext): EnrichResu
   // "godišnjica", so without this it would fall through to the present-buying path.
   const isMemorialNote = isMemorial(folded);
   const isAnniversary = ANNIVERSARY.test(folded) && !isMemorialNote;
-  const statedDate = isBirthday || isAnniversary || isMemorialNote ? extractExplicitDate(text) : null;
+  // Explicit or relative — "5.9." and "u subotu" both date the occasion (statedOccasionDate).
+  const statedDate = isBirthday || isAnniversary || isMemorialNote ? statedOccasionDate(text, ctx.now) : null;
   // A date next to "rođendan" is the anchor, not a task time.
   const time = statedDate ? null : extractTime(text, ctx.now, language);
 

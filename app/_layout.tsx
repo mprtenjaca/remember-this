@@ -12,11 +12,14 @@ import { openDb } from '@/db';
 import { setIdGenerator } from '@/lib/ids';
 import { kickEnrichQueue } from '@/services/ai/queue';
 import { refillScheduledWindow } from '@/services/scheduling/refill';
+import { configureNotificationHandler, useNotificationRuntime } from '@/services/notifications/runtime';
 import { hasOnboarded } from '@/services/onboarding';
 import { FONT } from '@/ui/theme/tokens';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 setIdGenerator(() => Crypto.randomUUID());
+// Module scope: the handler must be set before any notification can arrive, including one that launched the app.
+configureNotificationHandler();
 
 export default function RootLayout() {
   return (
@@ -61,6 +64,9 @@ function Boot() {
     });
     return () => sub.remove();
   }, [dbReady]);
+
+  // Notification taps and the after-restart rehydration. Only once the DB is open — both need it.
+  useNotificationRuntime(dbReady);
 
   const ready = fontsReady && themeReady && ((dbReady && onboarded != null) || !!dbError);
   useEffect(() => {

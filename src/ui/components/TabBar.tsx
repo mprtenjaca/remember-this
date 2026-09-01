@@ -16,10 +16,12 @@ import { uiLang } from '../theme/locale';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
-const ICONS: Record<string, { on: IoniconName; off: IoniconName; label: string }> = {
-  index: { on: 'sunny', off: 'sunny-outline', label: 'Danas' },
-  timeline: { on: 'layers', off: 'layers-outline', label: 'Sve' },
-  search: { on: 'search', off: 'search-outline', label: 'Traži' },
+// Labels are read by screen readers only (the dock is icon-only), and follow the DEVICE language like all UI copy.
+const ICONS: Record<string, { on: IoniconName; off: IoniconName; label: { hr: string; en: string } }> = {
+  // A calendar page with today's dot, not a sun: the sun read as weather (Marko, 2026-08-28).
+  index: { on: 'today', off: 'today-outline', label: { hr: 'Danas', en: 'Today' } },
+  timeline: { on: 'layers', off: 'layers-outline', label: { hr: 'Sve', en: 'All' } },
+  search: { on: 'search', off: 'search-outline', label: { hr: 'Traži', en: 'Search' } },
 };
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
@@ -34,13 +36,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         <View style={styles.row}>
           {state.routes.map((route, i) => {
             const focused = state.index === i;
-            const icon = ICONS[route.name] ?? { on: 'ellipse', off: 'ellipse-outline', label: route.name };
+            const icon = ICONS[route.name] ?? { on: 'ellipse', off: 'ellipse-outline', label: { hr: route.name, en: route.name } };
             return (
               <Pressable
                 key={route.key}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: focused }}
-                accessibilityLabel={icon.label}
+                accessibilityLabel={icon.label[hr ? 'hr' : 'en']}
                 onPress={() => {
                   void Haptics.selectionAsync().catch(() => undefined);
                   navigation.navigate(route.name);

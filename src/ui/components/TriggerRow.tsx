@@ -33,6 +33,9 @@ export function TriggerRow({ trigger: tr, now, anchorLabel, onPress, onLongPress
   const t = useTheme();
   const hr = lang === 'hr';
   const done = tr.state !== 'active';
+  // A fired one-off has its fire_at cleared by markFired(); the row keeps showing WHEN it was, faded with the rest
+  // of the row — a reminder that is done should not lose its time (Marko, 2026-08-28).
+  const when = tr.fireAt ?? tr.lastFiredAt;
   const kw = tr.type === 'semantic' ? (tr.payload as { keywords: string[] }).keywords : null;
   const pendingAnchor = tr.type === 'anchor' && !tr.anchorId;
 
@@ -78,9 +81,9 @@ export function TriggerRow({ trigger: tr, now, anchorLabel, onPress, onLongPress
           <Mono tone="muted" size="xs" numberOfLines={2} style={{ marginTop: 2 }}>
             {kw.join(' · ')}
           </Mono>
-        ) : tr.fireAt ? (
+        ) : when ? (
           <Mono tone="muted" size="xs" style={{ marginTop: 2 }}>
-            {fmtDateTime(tr.fireAt)} · {fmtRelative(tr.fireAt, now, lang)}
+            {fmtDateTime(when)} · {fmtRelative(when, now, lang)}
           </Mono>
         ) : pendingAnchor ? (
           <Mono tone="muted" size="xs" style={{ marginTop: 2 }}>

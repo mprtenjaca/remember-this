@@ -70,3 +70,22 @@ describe('textDistance', () => {
     expect(textDistance('', 'nesto')).toBe(1);
   });
 });
+
+// Marko, 2026-08-28: any changed WORD offers the re-read — the offer costs one tap, a missed one costs the reminders.
+describe('any changed word asks', () => {
+  it('one added word', () => {
+    // "servis" is a meaning word, so this one is named as such — what matters is that it asks.
+    expect(shouldOfferReread('Servis auta', 'Servis auta kod Ivana').ask).toBe(true);
+  });
+
+  it('one swapped word in a longer note', () => {
+    const d = shouldOfferReread('Konoba Mare ima odličan brudet i dobar pogled', 'Konoba Mare ima odličan brudet i dobru pjenicu');
+    expect(d.ask).toBe(true);
+    expect(d.reason).toBe('changed');
+  });
+
+  it('a dash for a comma, or a fixed diacritic, still does not', () => {
+    expect(shouldOfferReread('Mehaničar Dario, klima', 'Mehaničar Dario — klima').ask).toBe(false);
+    expect(shouldOfferReread('Konoba Mare ima odlican brudet', 'Konoba Mare ima odličan brudet').ask).toBe(false);
+  });
+});

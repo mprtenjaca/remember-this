@@ -2,7 +2,7 @@
 // and shows the next 90 days + OS slot usage. This is the test device until the dev build exists.
 
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/ui/theme/ThemeProvider';
 import { R, S } from '@/ui/theme/tokens';
@@ -18,7 +18,8 @@ import { triggersRepo } from '@/db/repositories/triggers';
 import { notesRepo } from '@/db/repositories/notes';
 import { anchorsRepo } from '@/db/repositories/anchors';
 import { surfacingsRepo } from '@/db/repositories/surfacings';
-import { scheduler } from '@/services/notifications';
+import { scheduler, inExpoGo } from '@/services/notifications';
+import { ensureNotificationPermission } from '@/services/notifications/permission';
 import { refillScheduledWindow } from '@/services/scheduling/refill';
 import { loadToday } from '@/services/today';
 import { capture } from '@/services/capture';
@@ -58,6 +59,27 @@ async function reset() {
     await refillScheduledWindow();
   }
   dbEvents.emit('clock', { now });
+}
+
+/**
+ * The one thing no unit test can answer: does a real notification arrive, with our sound and our icon? Ten seconds
+ * so the app can be sent to the background first — a banner while the app is open is not the same check.
+ * Uses the real clock deliberately: the OS knows nothing about FakeClock time travel.
+ */
+async function testNotification() {
+  const { granted } = await ensureNotificationPermission();
+  if (!granted) {
+    Alert.alert('Nema dozvole', 'Obavijesti nisu dopuštene — uključi ih u postavkama sustava.');
+    return;
+  }
+  await scheduler.schedule({
+    triggerId: 'debug',
+    noteId: 'debug',
+    fireAt: Date.now() + 10_000,
+    title: 'Test — čuje li se ding?',
+    body: 'Ako čuješ zvuk i vidiš žarulju u statusnoj traci, M4 radi.',
+  });
+  Alert.alert('Zakazano', 'Stiže za 10 sekundi. Prebaci app u pozadinu.');
 }
 
 async function load() {
@@ -125,6 +147,9 @@ export default function DebugTimeline() {
         <View style={[styles.chips, { marginTop: S.sm }]}>
           <Button title="Evaluiraj Today" variant="primary" size="sm" onPress={() => run('today', loadToday)} />
           <Button title="Refill slotova" variant="soft" size="sm" onPress={() => run('refill', refillScheduledWindow)} />
+          {/* Dev build only: the one thing that cannot be tested without the OS — does a real notification arrive,
+              with our sound and our icon? Fires in 10 s so the app can be backgrounded to see it properly. */}
+          {!inExpoGo ? <Button title="Test obavijest (10 s)" variant="soft" size="sm" icon="notifications-outline" onPress={() => run('notify', testNotification)} disabled={!!busy} /> : null}
         </View>
       </View>
 

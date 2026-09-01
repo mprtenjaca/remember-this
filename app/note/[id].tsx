@@ -1,7 +1,7 @@
 // Note detail + edit (M3-lite). Every change goes through applyMutations() → user_edited = 1, audit, undo.
 // Time edits use the NATIVE picker. Never a custom one.
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Animated, { FadeInDown, FadeOut } from "react-native-reanimated";
@@ -26,8 +26,11 @@ import { anchorsRepo } from "@/db/repositories/anchors";
 import { editsRepo } from "@/db/repositories/edits";
 import { applyMutations, undoLast } from "@/db/applyMutations";
 import { clock } from "@/domain/clock";
-import { fmtDate, fmtDateTime, fmtMonthDay, fmtRelative, toLocalIso } from "@/domain/dates";
+import { fmtDate, fmtDateTime, fmtMonthDay, fmtRelative, fmtTime, toLocalIso } from "@/domain/dates";
+import { dayOfTimeMutations } from "@/domain/anchorTime";
+import { sortByWhen } from "@/domain/reminderOrder";
 import { describeMutation } from "@/domain/mutations";
+import { collapseAnchorToSameDay } from "@/domain/sameDay";
 import { DEFAULT_ANCHOR_TIME, formatMonthDay, nextOccurrence } from "@/domain/triggers/resolve";
 import type { Anchor, Mutation, Trigger } from "@/domain/types";
 import { retryEnrich } from "@/services/ai/queue";
@@ -54,6 +57,9 @@ export default function NoteScreen() {
   const { data } = useLiveQuery(() => load(id!), [id]);
   const [editing, setEditing] = useState(false);
   const [editingBody, setEditingBody] = useState(false);
+  // Set the moment an edit is committed, so the blur that follows the button press does not read as "cancel".
+  const bodyCommitted = useRef(false);
+  const summaryCommitted = useRef(false);
   const [bodyDraft, setBodyDraft] = useState("");
   const [draft, setDraft] = useState("");
   const [picker, setPicker] = useState<{ kind: "time"; triggerId: string | null; value: Date } | { kind: "anchor"; anchor: Anchor; value: Date } | null>(null);
@@ -74,7 +80,8 @@ export default function NoteScreen() {
   const lang = uiLang(); // UI copy follows the DEVICE language, never the note
   const progress = reminderProgress(triggers);
   // The semantic trigger is not a reminder — it gets its own row below, with no actions.
-  const reminders = triggers.filter((tr) => tr.type !== "semantic");
+  // By when they happen — including fired/done ones by the time they went off, and hand-added ones in their place.
+  const reminders = sortByWhen(triggers.filter((tr) => tr.type !== "semantic"));
   const semantic = triggers.find((tr) => tr.type === "semantic");
   const keywords = semantic ? (semantic.payload as { keywords: string[] }).keywords : [];
   const hr = lang === "hr";
@@ -91,7 +98,8 @@ export default function NoteScreen() {
             void commitTime(triggerId, d);
           },
         },
-        { text: hr ? "Odmah" : "Now", onPress: () => void commitTime(triggerId, new Date(now + 60_000)) },
+        // Says what happens: the reminder is set a minute from now, so it appears on Today right away.
+        { text: hr ? "Pokaži odmah" : "Show now", onPress: () => void commitTime(triggerId, new Date(now + 60_000)) },
       ]);
       return;
     }
@@ -110,17 +118,39 @@ export default function NoteScreen() {
     setPicker({ kind: "time", triggerId, value: new Date(Math.max(initial, now + 3_600_000)) });
   };
 
-  /** Wrong birthday? Change the anchor once — every reminder bound to it (in every note) moves with it. */
-  const commitAnchor = async (anchor: Anchor, d: Date) => {
+  /**
+   * Wrong birthday? Change the anchor once — every reminder bound to it (in every note) moves with it.
+   * Moved onto TODAY, this note's chain collapses to the same-day pair (sat prije · u to vrijeme) in the same
+   * mutation batch — the lead reminders would otherwise land in next year (Marko, 2026-08-28). One undo restores all.
+   */
+  const commitAnchor = async (anchor: Anchor, d: Date, timeSet = false) => {
     const monthDay = formatMonthDay(d.getMonth() + 1, d.getDate());
     const bound = (await triggersRepo.byAnchor(db(), anchor.id)).filter((x) => x.state === "active");
     const notes = new Set(bound.map((x) => x.noteId)).size;
+    const sameDay = collapseAnchorToSameDay(triggers, anchor.id, d.getTime(), now, hr ? "hr" : "en");
+    // A chosen time re-times only this note's day-of reminder — the leads keep their hour (domain/anchorTime.ts).
+    // Not when the date is today: the same-day pair above already carries the hour.
+    const moved: Anchor = { ...anchor, monthDay, ...(anchor.kind === "oneoff" ? { year: d.getFullYear() } : {}) };
+    const timeMuts = timeSet && sameDay.mutations.length === 0 ? dayOfTimeMutations(triggers, moved, { hour: d.getHours(), minute: d.getMinutes() }, clock, hr ? "hr" : "en") : [];
     const apply = () =>
-      void mutate([{ op: "set_anchor", anchorId: anchor.id, monthDay, ...(anchor.kind === "oneoff" ? { year: d.getFullYear() } : {}) }], `${anchor.label} → ${fmtMonthDay(monthDay)}`);
-    if (bound.length <= 1) return apply();
+      void mutate(
+        [{ op: "set_anchor", anchorId: anchor.id, monthDay, ...(anchor.kind === "oneoff" ? { year: d.getFullYear() } : {}) }, ...sameDay.mutations, ...timeMuts],
+        `${anchor.label} → ${fmtMonthDay(monthDay)}${timeMuts.length ? ` ${fmtTime(d.getTime())}` : ""}`,
+      );
+    if (bound.length <= 1 && sameDay.mutations.length === 0) return apply();
     Alert.alert(
       `${anchor.label} → ${fmtMonthDay(monthDay)}`,
-      hr ? `Ovo pomiče ${bound.length} podsjetnika u ${notes} ${notes === 1 ? "bilješci" : "bilješke"}.` : `This moves ${bound.length} reminders in ${notes} note${notes === 1 ? "" : "s"}.`,
+      sameDay.mutations.length
+        ? hr
+          ? sameDay.moment
+            ? "To je danas: ostaju dva podsjetnika — sat prije i u to vrijeme."
+            : "To je danas i vrijeme je prošlo: podsjetnici se miču, ništa se ne postavlja."
+          : sameDay.moment
+            ? "That is today: two reminders stay — an hour before and at the time."
+            : "That is today and the time has passed: the reminders go, nothing is set."
+        : hr
+          ? `Ovo pomiče ${bound.length} podsjetnika u ${notes} ${notes === 1 ? "bilješci" : "bilješke"}.`
+          : `This moves ${bound.length} reminders in ${notes} note${notes === 1 ? "" : "s"}.`,
       [
         { text: hr ? "Odustani" : "Cancel", style: "cancel" },
         { text: hr ? "Pomakni" : "Move", onPress: apply },
@@ -129,7 +159,12 @@ export default function NoteScreen() {
   };
 
   const openAnchorPicker = (anchor: Anchor) => {
-    setPicker({ kind: "anchor", anchor, value: anchor.monthDay ? nextOccurrence(anchor.monthDay, clock) : new Date(now) });
+    // Opens at the day-of reminder's current hour (or the default), so the time counts as chosen only if moved.
+    const dayOf = triggers.find((x) => x.type === "anchor" && x.anchorId === anchor.id && x.offsetDays === 0 && x.state === "active");
+    const at = (dayOf?.payload as { hour?: number; minute?: number } | undefined) ?? DEFAULT_ANCHOR_TIME;
+    const start = anchor.monthDay ? nextOccurrence(anchor.monthDay, clock) : new Date(now);
+    start.setHours(at.hour ?? DEFAULT_ANCHOR_TIME.hour, at.minute ?? DEFAULT_ANCHOR_TIME.minute, 0, 0);
+    setPicker({ kind: "anchor", anchor, value: start });
   };
 
   /**
@@ -218,6 +253,7 @@ export default function NoteScreen() {
   };
 
   const startEdit = () => {
+    summaryCommitted.current = false;
     setDraft(note.summary ?? note.rawText);
     setEditing(true);
   };
@@ -227,16 +263,30 @@ export default function NoteScreen() {
    * hand-made change is sacred (hard rule 3).
    */
   const saveBody = async () => {
+    bodyCommitted.current = true;
     setEditingBody(false);
     const next = bodyDraft.trim();
     if (!next || next === note.rawText) return;
     await setNoteText(note.id, next);
     if (!shouldOfferReread(note.rawText, next).ask) return;
+    askReread(hr ? "Tekst se promijenio. Mogu ponovno pročitati bilješku i posložiti podsjetnike prema novom tekstu." : "The text changed. I can read the note again and set the reminders from the new text.");
+  };
+
+  /** Tapping outside the box cancels the edit — nothing half-open stays on screen (Marko, 2026-08-28). */
+  const cancelBody = () => {
+    if (bodyCommitted.current) return; // the blur that follows "Spremi" must not undo it
+    setEditingBody(false);
+    setBodyDraft("");
+  };
+
+  /**
+   * The one confirmation before a re-read, wherever it is asked from: after a body edit, from the ✨ next to the
+   * text, or from the actions list. Never silent — re-reading can move reminders (hard rule 3).
+   */
+  const askReread = (body?: string) => {
     Alert.alert(
       hr ? "Pročitati ponovno?" : "Read it again?",
-      hr
-        ? "Tekst se dosta promijenio. Mogu ponovno pročitati bilješku i posložiti podsjetnike prema novom tekstu."
-        : "The text changed quite a bit. I can read the note again and set the reminders from the new text.",
+      body ?? (hr ? "Ponovno izvučem podsjetnike iz teksta. Tvoje ručne izmjene ostaju." : "I extract the reminders from the text again. Your manual changes stay."),
       [
         { text: hr ? "Ostavi kako je" : "Leave as is", style: "cancel" },
         { text: hr ? "Pročitaj ponovno" : "Read again", onPress: () => void retryEnrich(note.id) },
@@ -245,9 +295,16 @@ export default function NoteScreen() {
   };
 
   const saveSummary = () => {
+    summaryCommitted.current = true;
     setEditing(false);
     const v = draft.trim();
-    if (v && v !== (note.summary ?? "")) void mutate([{ op: "edit_summary", text: v }], hr ? "Sažetak spremljen" : "Summary saved");
+    if (v && v !== (note.summary ?? "")) void mutate([{ op: "edit_summary", text: v }], hr ? "Naslov spremljen" : "Title saved");
+  };
+
+  /** Return key saves; tapping anywhere else cancels — the same rule as for the text below. */
+  const cancelSummary = () => {
+    if (summaryCommitted.current) return;
+    setEditing(false);
   };
 
   return (
@@ -294,14 +351,14 @@ export default function NoteScreen() {
             autoFocus
             value={draft}
             onChangeText={setDraft}
-            onBlur={saveSummary}
+            onBlur={cancelSummary}
             onSubmitEditing={saveSummary}
             returnKeyType="done"
             style={[styles.summaryInput, { color: t.c.fg, borderColor: t.c.accent }]}
             maxLength={120}
           />
         ) : (
-          <Pressable onPress={startEdit} accessibilityRole="button" accessibilityLabel={hr ? "Uredi sažetak" : "Edit summary"}>
+          <Pressable onPress={startEdit} accessibilityRole="button" accessibilityLabel={hr ? "Uredi naslov" : "Edit title"}>
             {/* Long titles step down a size so they don't wrap into a wall of four lines */}
             <Display size={(note.summary ?? note.rawText).length > 34 ? "xl" : "xxl"} weight="semi" style={{ marginTop: S.sm }}>
               {note.summary ?? note.rawText}
@@ -318,6 +375,9 @@ export default function NoteScreen() {
               multiline
               value={bodyDraft}
               onChangeText={setBodyDraft}
+              // The Screen's ScrollView dismisses the keyboard on a tap outside (keyboardShouldPersistTaps="handled"),
+              // which blurs this input — and that tap means "never mind". Buttons still get their press first.
+              onBlur={cancelBody}
               style={[styles.bodyInput, { color: t.c.fg2, borderColor: t.c.accent }]}
               maxLength={2000}
               accessibilityLabel={hr ? "Uredi tekst bilješke" : "Edit note text"}
@@ -340,15 +400,30 @@ export default function NoteScreen() {
         ) : (
           <Pressable
             onPress={() => {
+              bodyCommitted.current = false;
               setBodyDraft(note.rawText);
               setEditingBody(true);
             }}
             accessibilityRole="button"
             accessibilityLabel={hr ? "Uredi tekst bilješke" : "Edit note text"}
+            style={styles.bodyRow}
           >
-            <Body tone="fg2" style={{ marginTop: S.md }}>
+            <Body tone="fg2" style={{ flex: 1 }}>
               {note.rawText}
             </Body>
+            {/* ✨ = "let the app read this again", right where the text is — the same action as in the list below,
+                without scrolling for it. Muted on purpose: an offer, not a call to action. */}
+            {note.status !== "pending" ? (
+              <Pressable
+                onPress={() => askReread()}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={hr ? "Pročitaj ponovno" : "Read again"}
+                style={({ pressed }) => [styles.rereadBtn, { backgroundColor: t.c.glass, opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Ionicons name="sparkles-outline" size={14} color={t.c.muted} />
+              </Pressable>
+            ) : null}
           </Pressable>
         )}
 
@@ -515,7 +590,8 @@ export default function NoteScreen() {
                 }}
                 hitSlop={10}
               >
-                <Body size="sm" style={{ color: t.c.signal, fontFamily: FONT.bodySemibold }}>
+                {/* Accent, not amber: amber belongs to the resurface moment alone (docs/04-DESIGN.md). */}
+                <Body size="sm" style={{ color: t.c.accent, fontFamily: FONT.bodySemibold }}>
                   {hr ? "Poništi" : "Undo"}
                 </Body>
               </Pressable>
@@ -527,20 +603,34 @@ export default function NoteScreen() {
       <DatePickerSheet
         visible={!!picker}
         value={picker?.value ?? new Date()}
-        mode={picker?.kind === "anchor" ? "date" : "datetime"}
+        // Both take an optional time; for an occasion it lands on the day-of reminder only.
+        mode="datetime"
         title={picker?.kind === "anchor" ? picker.anchor.label : hr ? "Kad da te podsjetim?" : "When should I remind you?"}
         subtitle={picker?.kind === "anchor" ? null : hr ? "Vrijeme je neobavezno — dan je dovoljan." : "The time is optional — a day is enough."}
-        // Adding a reminder offers date + time, but never demands the time.
-        dayOnlyLabel={picker?.kind === "anchor" ? null : hr ? "Bez vremena" : "No time"}
+        // Adding a reminder offers date + time, but never demands the time: dismissing the clock keeps the day at the
+        // default hour. ("Bez vremena" as a button went — it did nothing visible; Marko, 2026-08-28.)
         dayOnlyAt={DEFAULT_ANCHOR_TIME}
-        dayOnlyTitle={hr ? "Treba li točno vrijeme?" : "Does it need a time?"}
-        timeLabel={hr ? "Odaberi vrijeme" : "Pick a time"}
+        // Editing an existing reminder: the sheet is also where you get rid of it.
+        deleteLabel={picker?.kind === "time" && picker.triggerId ? (hr ? "Obriši podsjetnik" : "Delete reminder") : undefined}
+        onDelete={() => {
+          const p = picker;
+          setPicker(null);
+          if (p?.kind === "time" && p.triggerId) void mutate([{ op: "remove_trigger", triggerId: p.triggerId }], hr ? "Podsjetnik obrisan" : "Reminder deleted");
+        }}
         onCancel={() => setPicker(null)}
-        onConfirm={(d) => {
+        timeStatus={
+          picker?.kind === "anchor"
+            ? {
+                unset: hr ? "Vrijeme nije postavljeno — podsjetnik na dan u zadano vrijeme" : "No time set — the day-of reminder at the default hour",
+                set: (d) => (hr ? `Podsjetnik na dan u ${fmtTime(d.getTime())}` : `Day-of reminder at ${fmtTime(d.getTime())}`),
+              }
+            : undefined
+        }
+        onConfirm={(d, meta) => {
           const p = picker;
           setPicker(null);
           if (!p) return;
-          if (p.kind === "anchor") void commitAnchor(p.anchor, d);
+          if (p.kind === "anchor") void commitAnchor(p.anchor, d, meta.timeSet);
           else commitTime(p.triggerId, d);
         }}
       />
@@ -571,6 +661,8 @@ const styles = StyleSheet.create({
   doneChip: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth },
   searchRow: { flexDirection: "row", alignItems: "center", gap: S.sm },
   reminderActions: { flexDirection: "row", alignItems: "center", marginTop: S.sm, flexWrap: "wrap" },
+  bodyRow: { flexDirection: "row", alignItems: "flex-start", gap: S.sm, marginTop: S.md },
+  rereadBtn: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", marginTop: 2 },
   snack: { position: "absolute", left: S.lg, right: S.lg, bottom: S.xl },
   snackInner: { flexDirection: "row", alignItems: "center", gap: S.md, paddingHorizontal: S.lg, paddingVertical: S.md },
 });

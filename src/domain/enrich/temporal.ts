@@ -28,8 +28,11 @@ export type TemporalSignal =
   | { type: 'time_only'; hour: number; minute: number; text: string }
   /** "sutra", "za 2 tjedna", "sljedeći mjesec" — an offset from now, in calendar units. */
   | { type: 'relative'; days?: number; weeks?: number; months?: number; years?: number; hour: number | null; minute: number; approximate: boolean; text: string }
-  /** "u petak", "sljedeći petak", "ove subote". */
-  | { type: 'weekday'; weekday: number; occurrence: 'next' | 'following'; hour: number | null; minute: number; text: string }
+  /**
+   * "u petak", "sljedeći petak", "ove subote". `weeksAhead` is set by "za 2 tjedna u subotu": the Saturday of
+   * the week that many weeks from now, not the coming Saturday and not today + 14.
+   */
+  | { type: 'weekday'; weekday: number; occurrence: 'next' | 'following'; weeksAhead?: number; hour: number | null; minute: number; text: string }
   /** "krajem tjedna", "sredinom mjeseca", "krajem godine" — a named part of a period. */
   | { type: 'part'; of: 'week' | 'month' | 'year'; at: 'start' | 'mid' | 'end'; next: boolean; hour: number; minute: number; text: string }
   /**
@@ -164,19 +167,47 @@ function parseClock(f: string): { hour: number; minute: number } | null {
   const withUnit = /\b(?:u|at|@)?\s*(\d{1,2})(?::(\d{2}))?\s*(h|sati|sat|am|pm)\b/.exec(f);
   const withMinutes = /\b(?:u|at|@)\s*(\d{1,2})(?::(\d{2}))\b/.exec(f);
   // A bare "u 2" / "u 7" with no unit and no minutes — only after a preposition, so plain numbers in the text
-  // ("kupiti 2 karte") are not mistaken for a time.
-  const bare = /\b(?:u|at|@)\s*(\d{1,2})(?!\s*[:.\d])(?!\s*(?:h|sati|sat|am|pm|eur|kn|km|min))\b/.exec(f);
-  const m = withUnit ?? withMinutes ?? bare;
-  if (!m) return null;
+  // ("kupiti 2 karte") are not mistaken for a time. "u 10 misecu" is a MONTH said by number without the
+  // ordinal dot (dictation never writes one) — it must not become 10 o'clock, so the month words are excluded
+  // like any other unit. namedMonth() picks it up instead.
+  const bare = /\b(?:u|at|@)\s*(\d{1,2})(?!\s*[:.\d])(?!\s*(?:h|sati|sat|am|pm|eur|kn|km|min|mjesec|misec|month))\b/.exec(f);
 
-  let hour = Number(m[1]);
-  const suffix = m[3];
-  if (suffix === 'pm' && hour < 12) hour += 12;
-  if (suffix === 'am' && hour === 12) hour = 0;
+  // Spoken half-hours, the way dictation writes them: "u pola 9" is 8:30, "u 9 i pol" / "u 9 i 30" is 9:30. The
+  // hour they name is as ambiguous as a bare one ("pola 3" is 14:30 in the afternoon sense), so the minutes here
+  // do NOT count as an explicit 24h form — the day-part rules below still apply.
+  const halfTo = /\b(?:u|at|oko)?\s*pola\s+(\d{1,2})\b(?!\s*(?:h|sati|sat|mjesec|misec|godin|dan|min|eur|kn|km|%))/.exec(f);
+  const andHalf = /\b(?:u|at)\s*(\d{1,2})\s+i\s+po(?:l|la)?\b/.exec(f); // "i pol", "i pola", Dalmatian "i po"
+  const andMinutes = /\b(?:u|at)\s*(\d{1,2})\s+i\s+(\d{1,2})\b(?!\s*(?:eur|kn|km|%|mjesec|misec|godin|dan|tjed))/.exec(f);
+
+  let hour: number;
+  let minute: number;
+  let explicit24h: boolean;
+  let suffix: string | undefined;
+  if (halfTo && Number(halfTo[1]) >= 1 && Number(halfTo[1]) <= 24) {
+    hour = Number(halfTo[1]) - 1; // "pola 9" = half an hour BEFORE nine
+    minute = 30;
+    explicit24h = hour > 12;
+  } else if (andHalf) {
+    hour = Number(andHalf[1]);
+    minute = 30;
+    explicit24h = hour > 12;
+  } else if (andMinutes && Number(andMinutes[2]) < 60) {
+    hour = Number(andMinutes[1]);
+    minute = Number(andMinutes[2]);
+    explicit24h = hour > 12;
+  } else {
+    const m = withUnit ?? withMinutes ?? bare;
+    if (!m) return null;
+    hour = Number(m[1]);
+    suffix = m[3];
+    if (suffix === 'pm' && hour < 12) hour += 12;
+    if (suffix === 'am' && hour === 12) hour = 0;
+    minute = Number(m[2] ?? 0);
+    explicit24h = hour > 12 || !!m[2] || suffix === 'am' || suffix === 'pm';
+  }
 
   // A named part of the day decides an ambiguous hour, in either direction.
   const part = parseDayPart(f)?.part;
-  const explicit24h = hour > 12 || !!m[2] || suffix === 'am' || suffix === 'pm';
   if (!explicit24h && hour >= 1 && hour <= 11) {
     if (part === 'afternoon' || part === 'evening' || part === 'night') hour += 12;
     else if (part === 'morning' || part === 'noon') {
@@ -186,7 +217,7 @@ function parseClock(f: string): { hour: number; minute: number } | null {
     }
   }
   if (hour < 0 || hour > 23) return null;
-  return { hour, minute: Number(m[2] ?? 0) };
+  return { hour, minute };
 }
 
 /** A named part of the day, if the text says one. */
@@ -272,9 +303,11 @@ const ORDINAL_WORDS: Record<string, number> = {
 /** The month a phrase names: "u 7. misecu", "u srpnju", "sljedeći misec". Null when none is named. */
 function namedMonth(f: string): number | null {
   // A duration is not a month name: "svakih 6 mjeseci" and "za 6 mjeseci" are lengths of time, while
-  // "u 9. mjesecu" is September. The ordinal dot is the giveaway, and duration wording is refused outright.
+  // "u 9. mjesecu" is September. Duration wording is refused outright; after that, either the ordinal dot
+  // ("9. mjesecu") or the locative ending ("u 10 misecu" — dictation writes no dot) marks a month by number.
+  // The genitive of a duration ("10 miseci") has a different ending, so it never matches the dotless form.
   if (/\b(za|svak\w*|every|in)\s+\d{1,2}\s*(mjesec|misec|month)/.test(f)) return null;
-  const numeric = /\b(\d{1,2})\.\s*(?:mjesec\w*|misec\w*|month)\b/.exec(f);
+  const numeric = /\b(\d{1,2})\.\s*(?:mjesec\w*|misec\w*|month)\b/.exec(f) ?? /\b(?:u|in)\s+(\d{1,2})\s+(?:mjesecu|misecu|month)\b/.exec(f);
   if (numeric) {
     const n = Number(numeric[1]);
     if (n >= 1 && n <= 12) return n;
@@ -391,12 +424,27 @@ const SEASONS: Array<[RegExp, 'spring' | 'summer' | 'autumn' | 'winter' | 'aroun
   [/\b(oko\s+\w+|pred\s+\w+|around)\b/, 'around'],
 ];
 
+// Spoken numbers before a unit: "za dva tjedna", "za tri dana", "u pet sati". Dictation writes them as words and
+// every rule below reads digits, so "za dva tjedna u subotu" fell through to the bare Saturday. Only a number
+// directly followed by a time unit is rewritten — "pet" the weekday stem, "tri puta" and "jedan Ivan" are left alone.
+const NUMBER_WORDS: Record<string, number> = {
+  jedan: 1, jednu: 1, jedno: 1, jednog: 1, dva: 2, dvije: 2, dvi: 2, tri: 3, cetiri: 4, pet: 5, sest: 6, sedam: 7, osam: 8, devet: 9, deset: 10,
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+};
+const NUMBER_WORD_RE = new RegExp(
+  `\\b(${Object.keys(NUMBER_WORDS).join('|')})\\s+(?=(?:dan|tjed|mjesec|misec|godin|sat|minut|day|week|month|year|hour|minute)\\w*\\b|h\\b)`,
+  'g',
+);
+export function numberWords(folded: string): string {
+  return folded.replace(NUMBER_WORD_RE, (_m, w: string) => `${NUMBER_WORDS[w]} `);
+}
+
 /**
  * All temporal signals in the text, most useful first.
  * Never throws; an empty array means "no time signal at all".
  */
 export function parseTemporal(text: string, now: number): TemporalSignal[] {
-  const f = fold(text);
+  const f = numberWords(fold(text));
   const out: TemporalSignal[] = [];
 
   const clock = parseClock(f);
@@ -498,7 +546,21 @@ export function parseTemporal(text: string, now: number): TemporalSignal[] {
           // same day. Both have to count, or the reminder lands seven days early.
           const nextWeekPhrase = /\b(sljedec\w*|iduc\w*|next)\s+(tjedan|tjedn\w*|week)\b/.test(f);
           const following = NEXT_WORDS.test(m[1]!) || nextWeekPhrase;
-          found.push({ type: 'weekday', weekday: i, occurrence: following ? 'following' : 'next', hour, minute, text: m[0].trim(), at: m.index });
+          // "za 2 tjedna u subotu" — the weekday inside the week N weeks ahead. Without this the two signals
+          // stayed separate and "za 2 tjedna" won on its own: a birthday "in two weeks on Saturday" landed on
+          // a Friday (device, 2026-08-28).
+          const weeksAhead = /\b(?:za|in)\s+(\d{1,2})\s*(?:tjedn\w*|weeks?)\b/.exec(f);
+          const n = weeksAhead ? Number(weeksAhead[1]) : 0;
+          found.push({
+            type: 'weekday',
+            weekday: i,
+            occurrence: following ? 'following' : 'next',
+            ...(n > 0 && !following ? { weeksAhead: n } : {}),
+            hour,
+            minute,
+            text: n > 0 && !following ? `${weeksAhead![0]} ${m[0].trim()}` : m[0].trim(),
+            at: m.index,
+          });
           break; // one hit per stem is enough
         }
       }
@@ -522,7 +584,9 @@ export function parseTemporal(text: string, now: number): TemporalSignal[] {
   if (abs) candidates.push({ type: 'absolute', month: abs.month, day: abs.day, year: abs.year, hour, minute, text: abs.text });
   // A named weekday beats a bare period: "sljedeći tjedan u sridu" is Wednesday, not that week's Monday. The
   // period word only survives as the modifier that pushes the day into the following week (see weekdays()).
-  const weekdayWins = wds.length > 0 && relative?.type === 'relative' && relative.weeks === 1;
+  // Any week count, not just "sljedeći tjedan": "za 2 tjedna u subotu" is that Saturday (weeksAhead on the
+  // weekday signal), so the bare "za 2 tjedna" steps aside the same way.
+  const weekdayWins = wds.length > 0 && relative?.type === 'relative' && relative.weeks != null && !relative.approximate;
   if (relative && !weekdayWins) candidates.push(relative);
   // The first weekday carries the note's own hour ("u petak navečer"); the later ones are content, at the default.
   for (const w of wds) {
@@ -652,13 +716,26 @@ export function resolveSignal(signal: TemporalSignal, now: number, intent: Inten
         d.setDate(1);
       }
       d.setHours(signal.hour ?? H, signal.minute, 0, 0);
-      if (signal.days === 0 && d.getTime() <= now) d.setDate(d.getDate() + 1); // "danas" but the hour passed
+      if (signal.days === 0 && d.getTime() <= now) {
+        // "danas" but the hour passed. A bare hour 1–11 is ambiguous, and once its morning reading is behind us the
+        // evening one is what was meant: "danas u 10" said at 17:00 is 22:00, not tomorrow morning (device,
+        // 2026-08-28 — it became an invented 18:00). An explicit afternoon hour, or no hour, rolls to tomorrow.
+        const evening = new Date(d);
+        if (signal.hour != null && signal.hour >= 1 && signal.hour <= 11) evening.setHours(signal.hour + 12);
+        if (evening.getTime() > now) d.setTime(evening.getTime());
+        else d.setDate(d.getDate() + 1);
+      }
       return { fireAt: d.getTime(), certainty: signal.approximate ? 'low' : signal.hour != null ? 'high' : 'high' };
     }
 
     case 'weekday': {
       const d = new Date(now);
-      if (signal.occurrence === 'following') {
+      if (signal.weeksAhead) {
+        // "za 2 tjedna u subotu": the Saturday of the week two weeks from THIS week — Monday of the current
+        // week, forward N weeks, then to the named day. Said on Friday 28.8. that is Sat 12.9., not Fri 11.9.
+        // (today + 14) and not Sat 29.8. (the coming one).
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + signal.weeksAhead * 7 + ((signal.weekday - 1 + 7) % 7));
+      } else if (signal.occurrence === 'following') {
         // "sljedeći tjedan u srijedu" means that day INSIDE next week — so anchor on next Monday and walk
         // forward, rather than adding 7 to the coming Wednesday. Said on a Friday those differ by a week:
         // the next Wednesday is already in next week, and +7 would overshoot into the week after.

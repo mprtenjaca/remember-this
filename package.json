@@ -13,7 +13,9 @@
     "p0": "tsx p0-harness/eval.ts",
     "worker:dev": "npm --prefix worker run dev",
     "worker:deploy": "npm --prefix worker run deploy",
-    "brand": "node scripts/brand/render.mjs"
+    "brand": "node scripts/brand/render.mjs",
+    "build:dev": "eas build --profile development --platform android",
+    "build:dev:ios": "eas build --profile development --platform ios"
   },
   "dependencies": {
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
@@ -39,6 +41,7 @@
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
     "expo-localization": "~17.0.9",
+    "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
     "expo-splash-screen": "~31.0.13",
     "expo-sqlite": "~16.0.10",

@@ -9,9 +9,11 @@ import { FONT, R, S, T } from '@/ui/theme/tokens';
 import { search, type SearchHit } from '@/services/search';
 import { aiConfigured } from '@/services/ai/client';
 import { clock } from '@/domain/clock';
+import { uiLang } from '@/ui/theme/locale';
 
 export default function SearchScreen() {
   const t = useTheme();
+  const hr = uiLang() === 'hr';
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,38 +43,44 @@ export default function SearchScreen() {
       <Screen scroll>
         <View style={styles.header}>
           <Display size="xxl" weight="bold">
-            Traži
+            {hr ? 'Traži' : 'Search'}
           </Display>
           <Mono tone="muted" style={{ marginTop: S.xs }}>
-            {aiConfigured() ? 'značenje + riječi' : 'po riječima · semantika stiže s AI proxyjem'}
+            {aiConfigured() ? (hr ? 'po značenju i riječima' : 'by meaning and words') : hr ? 'po riječima' : 'by words'}
           </Mono>
         </View>
 
         <TextInput
           value={q}
           onChangeText={setQ}
-          placeholder="Traži kako bi pitao prijatelja…"
+          placeholder={hr ? 'Traži kako bi pitao prijatelja…' : 'Search the way you would ask a friend…'}
           placeholderTextColor={t.c.muted}
           autoCorrect={false}
           returnKeyType="search"
           clearButtonMode="while-editing"
           style={[styles.input, { backgroundColor: t.c.glass, borderColor: t.c.glassBorder, color: t.c.fg }]}
-          accessibilityLabel="Pretraga bilješki"
+          accessibilityLabel={hr ? 'Pretraga bilješki' : 'Search notes'}
         />
 
         {hits == null ? (
           q.trim().length === 0 ? (
-            <EmptyState title="Što ti je trebalo prije pola godine?" body="Traži po značenju: „dobar mehaničar”, „poklon za Anu”, „onaj restoran u Zadru”." />
+            <EmptyState
+              title={hr ? 'Što ti je trebalo prije pola godine?' : 'What did you need six months ago?'}
+              body={hr ? 'Traži po značenju: „dobar mehaničar”, „poklon za Anu”, „onaj restoran u Zadru”.' : 'Search by meaning: "a good mechanic", "a gift for Ana", "that restaurant in Zadar".'}
+            />
           ) : null
         ) : hits.length === 0 ? (
-          <EmptyState title={busy ? '…' : 'Ništa slično.'} body={busy ? undefined : 'Možda još nije zapisano. Ako jest — zapiši opet, ovaj put s više riječi.'} />
+          <EmptyState
+            title={busy ? '…' : hr ? 'Ništa slično.' : 'Nothing like that.'}
+            body={busy ? undefined : hr ? 'Možda još nije zapisano — ili probaj drugim riječima.' : 'Maybe it was never written down — or try other words.'}
+          />
         ) : (
           <View style={{ marginTop: S.lg, gap: S.sm }}>
             {hits.map((h) => (
               <View key={h.note.id}>
                 <View style={styles.meta}>
                   <Mono tone={h.mode === 'semantic' ? 'accent' : 'muted'} size="xs">
-                    {h.mode === 'semantic' ? `≈ ${Math.round(h.score * 100)}%` : '= riječi'}
+                    {h.mode === 'semantic' ? `≈ ${Math.round(h.score * 100)}%` : hr ? '= riječi' : '= words'}
                   </Mono>
                 </View>
                 <NoteCard note={h.note} now={now} />

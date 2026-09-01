@@ -23,6 +23,8 @@ import { VoiceOrb, type OrbState } from '@/ui/components/VoiceOrb';
 import { Waveform } from '@/ui/components/Waveform';
 import { useKeyboardHeight } from '@/ui/hooks/useKeyboardHeight';
 import { capture } from '@/services/capture';
+import { captureEvents } from '@/lib/events';
+import { askStartupPermissions } from '@/services/notifications/permission';
 import { uiLang } from '@/ui/theme/locale';
 import { draftOutcome, type DraftChoice } from '@/domain/draftPolicy';
 import { relatedWhileTyping } from '@/services/search';
@@ -68,6 +70,10 @@ export default function CaptureScreen() {
       const outcome = draftOutcome(saved.current, latestText.current.trim().length > 0, draftChoice.current, draftId.current != null);
       if (outcome === 'keep') void saveDraft(latestText.current, draftId.current);
       else if (outcome === 'discard' && draftId.current) void deleteDraft(draftId.current);
+      // The permission pass belongs HERE, not to a successful save: the user has been through the welcome and
+      // seen the capture sheet, which is the context the prompts need — whether or not they wrote anything
+      // (Marko, 2026-08-28). Runs once ever; a no-op in Expo Go and after the first pass.
+      setTimeout(() => void askStartupPermissions(), 400);
     },
     [],
   );
@@ -108,7 +114,9 @@ export default function CaptureScreen() {
   };
 
   // ── voice
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
+  // Mono, not the preset's stereo: Whisper downmixes to mono 16 kHz anyway, so a second channel only doubles the
+  // upload (and the wait) for a phone mic that is mono to begin with. 44.1 kHz stays — resampling is the model's job.
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, numberOfChannels: 1, isMeteringEnabled: true });
   const recState = useAudioRecorderState(recorder, 80);
   const [voice, setVoice] = useState<Voice>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -122,7 +130,7 @@ export default function CaptureScreen() {
     try {
       const perm = await AudioModule.requestRecordingPermissionsAsync();
       if (!perm.granted) {
-        setVoiceError('Bez dozvole za mikrofon. Možeš diktirati i tipkovnicom (🎤 na tipkovnici).');
+        setVoiceError(hr ? 'Bez dozvole za mikrofon. Možeš diktirati i tipkovnicom (🎤 na tipkovnici).' : 'No microphone permission. You can still dictate with the keyboard (🎤 key).');
         setVoice('error');
         setTyping(true);
         return;
@@ -134,7 +142,7 @@ export default function CaptureScreen() {
       setVoice('recording');
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     } catch (e) {
-      setVoiceError(e instanceof Error ? e.message : 'Snimanje nije uspjelo');
+      setVoiceError(e instanceof Error ? e.message : hr ? 'Snimanje nije uspjelo' : 'Recording failed');
       setVoice('error');
     }
   };
@@ -147,16 +155,16 @@ export default function CaptureScreen() {
       await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       // Whisper hallucinates a word on near-silence ("Zvuk.") — don't even send clips under ~0.8 s.
       if (durationMs < 800) {
-        setVoiceError('Prekratko — drži malo dulje i reci cijelu misao.');
+        setVoiceError(hr ? 'Prekratko — drži malo dulje i reci cijelu misao.' : 'Too short — hold a little longer and say the whole thought.');
         setVoice('error');
         return;
       }
       const uri = recorder.uri;
-      if (!uri) throw new Error('Nema snimke');
+      if (!uri) throw new Error(hr ? 'Nema snimke' : 'No recording');
       const base64 = await readAsStringAsync(uri, { encoding: EncodingType.Base64 });
       const spoken = await transcribeAudio(base64, text);
       if (!spoken) {
-        setVoiceError('Nisam razumio govor. Probaj ponovno, bliže mikrofonu.');
+        setVoiceError(hr ? 'Nisam razumio govor. Probaj ponovno, bliže mikrofonu.' : 'I did not catch that. Try again, closer to the microphone.');
         setVoice('error');
         return;
       }
@@ -210,8 +218,12 @@ export default function CaptureScreen() {
     // dismissal, so the same words were filed as a note AND kept as a draft.
     saved.current = true;
     try {
-      await capture(v, dictations > 0 ? 'voice' : 'typed');
+      const id = await capture(v, dictations > 0 ? 'voice' : 'typed');
       if (draftId.current) void deleteDraft(draftId.current);
+      // The only confirmation the user gets: the sheet closes onto whichever tab was underneath, and the
+      // ReadingCard on Today is not reliable (the offline enricher finishes before the live query even sees
+      // `pending`). The tabs layout listens and shows the "Zapisano" card.
+      captureEvents.emit('saved', { id, text: v });
     } catch (e) {
       // The write failed, so the words are not filed anywhere — hand them back to the draft rather than
       // losing them behind an already-closed sheet.
@@ -230,7 +242,8 @@ export default function CaptureScreen() {
   };
 
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-  const statusLine = voice === 'transcribing' ? 'Prepisujem…' : words ? `${words} ${words === 1 ? 'riječ' : 'riječi'}` : '';
+  const statusLine =
+    voice === 'transcribing' ? (hr ? 'Prepisujem…' : 'Transcribing…') : words ? `${words} ${hr ? (words === 1 ? 'riječ' : 'riječi') : words === 1 ? 'word' : 'words'}` : '';
 
   // Keyboard height + a breath of air so Spremi/mic never sit on the keyboard edge.
   const bottomPad = Math.max(insets.bottom, S.md) + (keyboard > 0 ? keyboard - (Platform.OS === 'ios' ? insets.bottom : 0) + S.lg : 0);
@@ -253,10 +266,20 @@ export default function CaptureScreen() {
               <Waveform level={level} active={voice === 'recording'} bars={25} height={48} />
             </View>
             <Display size="xl" weight="semi" align="center" style={{ marginTop: S.md }}>
-              {voice === 'recording' ? 'Slušam…' : voice === 'transcribing' ? 'Prepisujem…' : text.trim() ? 'Dodaj još' : 'Reci što želiš zapamtiti'}
+              {voice === 'recording'
+                ? hr ? 'Slušam…' : 'Listening…'
+                : voice === 'transcribing'
+                  ? hr ? 'Prepisujem…' : 'Transcribing…'
+                  : text.trim()
+                    ? hr ? 'Dodaj još' : 'Add more'
+                    : hr ? 'Reci što želiš zapamtiti' : 'Say what you want to remember'}
             </Display>
             <Mono tone="muted" align="center" style={{ marginTop: S.xs }}>
-              {voice === 'recording' ? `${fmtDur(recState.durationMillis)} · tapni za kraj` : voice === 'transcribing' ? 'sekunda-dvije' : 'npr. „Ana želi Dyson fen za rođendan”'}
+              {voice === 'recording'
+                ? `${fmtDur(recState.durationMillis)} · ${hr ? 'tapni za kraj' : 'tap to finish'}`
+                : voice === 'transcribing'
+                  ? hr ? 'sekunda-dvije' : 'a second or two'
+                  : hr ? 'npr. „Ana želi Dyson fen za rođendan”' : 'e.g. "Ana wants a Dyson for her birthday"'}
             </Mono>
             {voice === 'error' && voiceError ? (
               <Body tone="danger" size="sm" align="center" style={{ marginTop: S.md }}>
@@ -285,12 +308,12 @@ export default function CaptureScreen() {
               multiline
               value={text}
               onChangeText={setText}
-              placeholder="Piši kako govoriš…"
+              placeholder={hr ? 'Piši kako govoriš…' : 'Write the way you speak…'}
               placeholderTextColor={t.c.muted}
               style={[styles.input, { color: t.c.fg }]}
               textAlignVertical="top"
               maxLength={2000}
-              accessibilityLabel="Tekst bilješke"
+              accessibilityLabel={hr ? 'Tekst bilješke' : 'Note text'}
             />
           </Animated.View>
         )}

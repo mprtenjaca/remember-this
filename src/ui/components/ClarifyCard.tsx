@@ -1,5 +1,5 @@
 // Clarify card — lives in the Today list, never a modal. Max 2 questions, always tap options.
-// Only exception: the native date picker for an anchor (one tap, no typing). Always an exit: "Samo zapamti".
+// Only exception: the native date picker for an anchor (one tap, no typing). Always an exit: "Bez podsjetnika" on the date question, "Preskoči pitanje" on the rest.
 
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
@@ -15,10 +15,11 @@ import { Glass } from './Glass';
 import { DatePickerSheet } from './DatePickerSheet';
 import type { NoteWithQuestions } from '@/db/repositories/notes';
 import type { AnchorKind } from '@/domain/types';
-import { formatMonthDay } from '@/domain/triggers/resolve';
-import { fmtMonthDay } from '@/domain/dates';
+import { DEFAULT_ANCHOR_TIME, formatMonthDay } from '@/domain/triggers/resolve';
+import { fmtMonthDay, fmtTime } from '@/domain/dates';
 import { anchorQuestion } from '@/domain/enrich/ingest';
 import { answerAnchor, answerOption, answerInterval, answerFallbackDate, dismissQuestions } from '@/services/anchors';
+import { captureEvents } from '@/lib/events';
 import { hasContactsPermission, lookupBirthday, requestContactsPermission, type ContactBirthday } from '@/services/contacts/birthday';
 import { db } from '@/db';
 import { triggersRepo } from '@/db/repositories/triggers';
@@ -26,6 +27,13 @@ import { triggersRepo } from '@/db/repositories/triggers';
 interface Props {
   note: NoteWithQuestions;
 }
+
+/**
+ * "Iz kontakata" is parked (Marko, 2026-08-28): a permission prompt inside the first question was one step too
+ * many for a first-time user, and the picker is one tap anyway. The lookup code stays (services/contacts) so the
+ * offer can come back in one place — e.g. as a settings-level opt-in rather than on the card.
+ */
+const OFFER_CONTACTS = false;
 
 export function ClarifyCard({ note }: Props) {
   const t = useTheme();
@@ -56,7 +64,7 @@ export function ClarifyCard({ note }: Props) {
   }, [note.id, pending]);
 
   useEffect(() => {
-    if (!pending) return;
+    if (!pending || !OFFER_CONTACTS) return;
     let alive = true;
     (async () => {
       if (!(await hasContactsPermission())) return;
@@ -70,20 +78,26 @@ export function ClarifyCard({ note }: Props) {
 
   if (!q || done) return null;
 
-  /** Every answer path: hide immediately, then persist. If persisting fails the live query brings the card back. */
-  const finish = async (work: Promise<unknown>) => {
+  /**
+   * Every answer path: hide immediately, then persist. If persisting fails the live query brings the card back.
+   * `announce` — a real answer (date, option, interval) shows the "Podsjetnik postavljen" card, the same one as
+   * after a save, but only if the save's own card is already gone (CaptureToast decides). Skipping announces nothing.
+   */
+  const finish = async (work: Promise<unknown>, announce = false) => {
     setDone(true);
     try {
       await work;
+      if (announce) captureEvents.emit('saved', { id: note.id, text: note.summary ?? note.rawText, kind: 'answered' });
     } catch {
       setDone(false);
     }
   };
 
-  const commitDate = async (d: Date) => {
+  /** @param timeSet the user moved the clock too — then the reminders take that hour; otherwise the default stays. */
+  const commitDate = async (d: Date, timeSet = false) => {
     // An interval question has no anchor behind it — the picked day replaces the guessed one directly.
     if (q?.kind === 'interval') {
-      await finish(answerFallbackDate(note.id, q.id, d.getTime()));
+      await finish(answerFallbackDate(note.id, q.id, d.getTime()), true);
       return;
     }
     if (!pending) {
@@ -99,18 +113,26 @@ export function ClarifyCard({ note }: Props) {
         monthDay: formatMonthDay(d.getMonth() + 1, d.getDate()),
         year: pending.kind === 'oneoff' ? d.getFullYear() : null,
         source: 'user',
+        at: timeSet ? { hour: d.getHours(), minute: d.getMinutes() } : null,
       }),
+      true,
     );
   };
 
   const openPicker = () => setShowPicker(true);
+  // Today at the default hour — the baseline the picker's "did they move the clock?" check compares against.
+  const [pickerStart] = useState(() => {
+    const d = new Date();
+    d.setHours(DEFAULT_ANCHOR_TIME.hour, DEFAULT_ANCHOR_TIME.minute, 0, 0);
+    return d;
+  });
 
   /** The user typed their own answer instead of picking one of ours. */
   const submitCustom = () => {
     const v = custom.trim();
     if (!v || !q) return;
     setTyping(false);
-    void finish(answerOption(note.id, q.id, v));
+    void finish(answerOption(note.id, q.id, v), true);
   };
 
   const fromContacts = async () => {
@@ -123,7 +145,7 @@ export function ClarifyCard({ note }: Props) {
     setContacts(found);
     if (found.length === 1) {
       const c = found[0]!;
-      await finish(answerAnchor({ noteId: note.id, person: pending.person, kind: pending.kind, monthDay: c.monthDay, year: null, source: 'contacts', contactId: c.contactId }));
+      await finish(answerAnchor({ noteId: note.id, person: pending.person, kind: pending.kind, monthDay: c.monthDay, year: null, source: 'contacts', contactId: c.contactId }), true);
     }
   };
 
@@ -146,7 +168,7 @@ export function ClarifyCard({ note }: Props) {
 
       {q.kind === 'date' ? (
         <View style={{ marginTop: S.md }}>
-          {contacts && contacts.length > 1 ? (
+          {OFFER_CONTACTS && contacts && contacts.length > 1 ? (
             <View style={styles.options}>
               {contacts.slice(0, 4).map((c, i) => (
                 <Animated.View key={c.contactId} entering={FadeInDown.delay(i * 60).springify()}>
@@ -154,7 +176,7 @@ export function ClarifyCard({ note }: Props) {
                     label={`${c.name} · ${fmtMonthDay(c.monthDay)}`}
                     onPress={() =>
                       pending &&
-                      void finish(answerAnchor({ noteId: note.id, person: pending.person, kind: pending.kind, monthDay: c.monthDay, year: null, source: 'contacts', contactId: c.contactId }))
+                      void finish(answerAnchor({ noteId: note.id, person: pending.person, kind: pending.kind, monthDay: c.monthDay, year: null, source: 'contacts', contactId: c.contactId }), true)
                     }
                   />
                 </Animated.View>
@@ -169,16 +191,18 @@ export function ClarifyCard({ note }: Props) {
             </Animated.View>
           </View>
           <View style={styles.options}>
-            {contacts == null || contacts.length === 0 ? (
+            {OFFER_CONTACTS && (contacts == null || contacts.length === 0) ? (
               <Animated.View entering={FadeInDown.delay(60).springify()}>
                 <Button title={hr ? 'Iz kontakata' : 'From contacts'} variant="soft" onPress={() => void fromContacts()} />
               </Animated.View>
             ) : null}
             <Animated.View entering={FadeInDown.delay(120).springify()}>
-              <Button title={hr ? 'Samo zapamti' : 'Just remember'} variant="ghost" onPress={() => void finish(dismissQuestions(note.id))} />
+              {/* Says the consequence: without a date there is no birthday reminder. "Samo zapamti" did not tell
+                  a first-time user what they were giving up (Marko, 2026-08-28). */}
+              <Button title={hr ? 'Bez podsjetnika' : 'No reminder'} variant="ghost" onPress={() => void finish(dismissQuestions(note.id))} />
             </Animated.View>
           </View>
-          {contacts && contacts.length === 0 ? (
+          {OFFER_CONTACTS && contacts && contacts.length === 0 ? (
             <Mono tone="muted" size="xs" style={{ marginTop: S.sm }}>
               {hr ? 'nema rođendana u kontaktima' : 'no birthday in contacts'}
             </Mono>
@@ -197,6 +221,7 @@ export function ClarifyCard({ note }: Props) {
                     q.kind === 'interval'
                       ? answerInterval(note.id, q.id, q.optionMonths?.[i] ?? 6)
                       : answerOption(note.id, q.id, o),
+                    true,
                   )
                 }
               />
@@ -233,7 +258,8 @@ export function ClarifyCard({ note }: Props) {
             </Animated.View>
           )}
           <Animated.View entering={FadeInDown.delay(((q.options?.length ?? 0) + 1) * 60).springify()}>
-            <Button title={hr ? 'Samo zapamti' : 'Just remember'} variant="ghost" size="sm" onPress={() => void finish(dismissQuestions(note.id))} />
+            {/* An options question changes no reminder, so skipping it loses nothing — say exactly that. */}
+            <Button title={hr ? 'Preskoči pitanje' : 'Skip the question'} variant="ghost" size="sm" onPress={() => void finish(dismissQuestions(note.id))} />
           </Animated.View>
         </View>
       )}
@@ -245,15 +271,24 @@ export function ClarifyCard({ note }: Props) {
           defence: the picker always opens, and commitDate decides what the answer attaches to. */}
       <DatePickerSheet
         visible={showPicker}
-        value={new Date()}
-        mode="date"
+        // Opens at the default hour, so a time counts as chosen only when the clock is actually moved.
+        value={pickerStart}
+        // The date question takes an optional time (Marko, 2026-08-28): "rođendan u 8" wants its reminders around
+        // eight, not at the default hour. Left alone, nothing is set and the default stays.
+        mode={q.kind === 'date' && pending ? 'datetime' : 'date'}
         title={pending ? anchorQuestion(pending.person, pending.kind, lang) : q.text}
+        subtitle={q.kind === 'date' && pending ? (hr ? 'Vrijeme je neobavezno — dan je dovoljan.' : 'The time is optional — a day is enough.') : null}
+        dayOnlyAt={DEFAULT_ANCHOR_TIME}
+        timeStatus={{
+          unset: hr ? 'Vrijeme nije postavljeno — podsjetnik na dan u zadano vrijeme' : 'No time set — the day-of reminder at the default hour',
+          set: (d) => (hr ? `Podsjetnik na dan u ${fmtTime(d.getTime())}` : `Day-of reminder at ${fmtTime(d.getTime())}`),
+        }}
         // A reminder in the past never fires; an interval question is always about the future.
         minimumDate={q.kind === 'interval' ? new Date() : undefined}
         onCancel={() => setShowPicker(false)}
-        onConfirm={(d) => {
+        onConfirm={(d, meta) => {
           setShowPicker(false);
-          void commitDate(d);
+          void commitDate(d, meta.timeSet);
         }}
       />
     </Animated.View>

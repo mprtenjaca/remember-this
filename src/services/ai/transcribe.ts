@@ -34,7 +34,19 @@ export async function transcribeAudio(base64: string, context = '', mime: string
   for (const mimeType of order) {
     const body = {
       language,
-      contents: [{ role: 'user', parts: [{ inlineData: { mimeType, data: base64 } }, { text: prompt }] }],
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64 } },
+            // Instructions — read by Gemini, and deliberately NOT forwarded to Whisper: its `prompt` is a style
+            // sample, not an instruction, so a block of directives ends up echoed into the transcript.
+            { text: prompt },
+            // The note so far. `voicePrompt` marks it as the one part Whisper may imitate (worker: groqWhisper).
+            ...(context.trim() ? [{ text: context.trim().slice(-400), voicePrompt: true }] : []),
+          ],
+        },
+      ],
       generationConfig: { temperature: 0, maxOutputTokens: 400, thinkingConfig: { thinkingBudget: 0 } },
     };
     try {

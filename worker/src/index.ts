@@ -75,7 +75,8 @@ async function rateLimit(env: Env, deviceId: string): Promise<boolean> {
 
 // ───────────────────────────────────────────── Gemini request shape helpers
 
-type Part = { text?: string; inlineData?: { mimeType: string; data: string } };
+/** `voicePrompt` marks the ONE text part Whisper may imitate as a style sample — see groqWhisper(). Gemini ignores it. */
+type Part = { text?: string; inlineData?: { mimeType: string; data: string }; voicePrompt?: boolean };
 type GeminiBody = {
   contents?: Array<{ role?: string; parts?: Part[] }>;
   systemInstruction?: { parts?: Part[] };
@@ -191,11 +192,16 @@ async function groqWhisper(body: GeminiBody, model: string, key: string): Promis
   // Pin the language: Whisper's auto-detect turns short Croatian clips into Slovenian/Serbian/Czech.
   const lang = typeof (body as { language?: unknown }).language === 'string' ? (body as { language: string }).language.toLowerCase() : 'hr';
   form.append('language', /^[a-z]{2}$/.test(lang) ? lang : 'hr');
-  // Whisper's prompt = vocabulary + continuity. The app sends the note text so far as a text part; feeding its tail
-  // back makes a second dictation continue in the same style (and keeps Croatian, not Czech).
-  const context = textOf(body.contents?.[0]?.parts?.filter((p) => p.text)).slice(-600);
-  const hint = 'Kratka osobna bilješka na hrvatskom. Datume piši znamenkama: 3.5., 10.6.2027. Imena, rođendan, godišnjica, servis, restoran, podsjetnik.';
-  form.append('prompt', context ? `${hint} Dosad: ${context}` : hint);
+  // Whisper's `prompt` is NOT an instruction — it is a sample of text whose STYLE and VOCABULARY the decoder
+  // imitates. It used to receive whatever text parts the app sent, which for this app is a five-line Croatian
+  // instruction block ("Transkribiraj govor DOSLOVNO…"): Whisper dutifully echoed its wording and register into
+  // the transcript, and Croatian came out garbled (Marko, 2026-08-28). Only the app's own `voicePrompt` part is
+  // used now — the note text so far, or nothing.
+  const sample = (body.contents?.[0]?.parts ?? []).find((p) => p.voicePrompt)?.text?.trim().slice(-400);
+  // A short example in the target language, written the way a note actually sounds — the dates show the format,
+  // the words prime the vocabulary. No instructions: Whisper cannot follow them, it can only imitate.
+  const hint = 'Branki je rođendan u subotu, kupiti poklon. Servis auta 10.6. Nazvati Ivana u ponedjeljak navečer.';
+  form.append('prompt', sample ? `${hint} ${sample}` : hint);
   return withDeadline(`whisper ${model}`, WHISPER_TIMEOUT_MS, (signal) =>
     fetch(`${GROQ}/audio/transcriptions`, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form, signal }),
   );

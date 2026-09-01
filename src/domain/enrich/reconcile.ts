@@ -19,11 +19,13 @@
 //   E15 tradesman written as a contact card            → future_need, not contact
 
 import type { Anchor, EnrichResult, EnrichTrigger, Intent, Language } from '../types';
-import { heuristicEnrich, fold, isLikelyPlace, detectLanguage, isMarriageAnniversary, extractExplicitDate, isMemorial } from './heuristic';
+import { heuristicEnrich, fold, isLikelyPlace, detectLanguage, isMarriageAnniversary, extractExplicitDate, isMemorial, statedOccasionDate } from './heuristic';
+import { formatMonthDay } from '../triggers/resolve';
 import { MARRIAGE_PERSON } from './ingest';
 import { offsetLabel } from '../triggers/resolve';
 import { findKnownDate } from './knownDates';
 import { parseTemporal, resolveSignal, signalLabel, toLocalIso as toLocalIsoTemporal } from './temporal';
+import { startOfDay } from '../dates';
 
 export interface ReconcileContext {
   now: number;
@@ -117,7 +119,12 @@ export function reconcile(raw: EnrichResult, rawText: string, ctx: ReconcileCont
   // ── stated occasion date (E3, E17): "rođendan 10.6", "godišnjica je treći petog". When the text itself dates the
   //    occasion, the model's own guesses are noise — a time trigger on some other day (Groq produced 15.01.2027 for
   //    "treći petog") is a hallucination, and any anchor it named must carry OUR date.
-  const statedMonthDay = hAnchor?.anchor_month_day ?? null;
+  // The heuristic only builds an anchor when it found a PERSON, so a nameless "rođendan u 8 u petak" arrived
+  // here with no stated date at all — and the model's anchor then asked "Kad je rođendan?" with the Friday sitting
+  // right there in the text (device, 2026-08-28). The text is the authority whether or not anyone is named.
+  const occasionWord = /\brodendan\w*|\bbirthday\b|godisnjic|anniversary/.test(folded);
+  const statedFromText = occasionWord ? statedOccasionDate(rawText, ctx.now) : null;
+  const statedMonthDay = hAnchor?.anchor_month_day ?? (statedFromText ? formatMonthDay(statedFromText.month, statedFromText.day) : null);
   // Was the date written in the NOTE ("rođendan 10.6", "treći petog"), or did the heuristic look it up in the
   // calendar? Only the former outranks the calendar; the distinction matters because both arrive as an anchor.
   const textStatedDate = extractExplicitDate(rawText) != null;
@@ -198,14 +205,36 @@ export function reconcile(raw: EnrichResult, rawText: string, ctx: ReconcileCont
         label: offsetLabel(memorial ? -7 : anniversary ? -14 : -21, labelLang),
         anchor_person: person,
         anchor_kind: memorial ? 'memorial' : anniversary ? 'anniversary' : 'birthday',
+        anchor_month_day: statedMonthDay,
         offset_days: memorial ? -7 : anniversary ? -14 : -21,
       };
       triggers.push({ ...a, anchor_person: a.anchor_person ?? person });
       if (!a.anchor_month_day && !needs_anchor)
         needs_anchor = h.needs_anchor ?? { person: a.anchor_person ?? person, kind: a.anchor_kind ?? (memorial ? 'memorial' : anniversary ? 'anniversary' : 'birthday') };
-    } else if (hAnchor?.anchor_month_day) {
+    } else if (statedMonthDay) {
       // model saw the person, we saw the date → E3
-      for (const t of triggers) if (t.type === 'anchor' && !t.anchor_month_day) t.anchor_month_day = hAnchor.anchor_month_day;
+      for (const t of triggers) if (t.type === 'anchor' && !t.anchor_month_day) t.anchor_month_day = statedMonthDay;
+      needs_anchor = null;
+    }
+  }
+
+  // ── E3 for the nameless: the block above needs a `person`; "rođendan u 8 u petak" has none, yet the model may
+  //    still have sent an anchor (with a guessed person) or a needs_anchor. A date written in the text fills every
+  //    anchor that lacks one and settles the question — whoever the occasion belongs to.
+  if (statedMonthDay) {
+    for (const t of triggers) if (t.type === 'anchor' && !t.anchor_month_day) t.anchor_month_day = statedMonthDay;
+    if (needs_anchor) {
+      if (!triggers.some((t) => t.type === 'anchor')) {
+        triggers.push({
+          type: 'anchor',
+          certainty: 'medium',
+          label: offsetLabel(-21, labelLang),
+          anchor_person: needs_anchor.person,
+          anchor_kind: needs_anchor.kind,
+          anchor_month_day: statedMonthDay,
+          offset_days: -21,
+        });
+      }
       needs_anchor = null;
     }
   }
@@ -216,6 +245,67 @@ export function reconcile(raw: EnrichResult, rawText: string, ctx: ReconcileCont
   //    TEXT actually stated survives (hTime) — only the model's own guess goes.
   if (needs_anchor && !statedMonthDay) {
     triggers = triggers.filter((t) => t.type !== 'time' || (hTime != null && t.iso_datetime === hTime.iso_datetime));
+  }
+
+  // ── E22: the occasion's own day is BOUND to the anchor, never a free time reminder. "Branki je rođendan u
+  //    subotu" produced the chain (−21/−7/−1) on the anchor plus a loose time trigger for Saturday; when the user
+  //    moved the birthday, the three followed and the Saturday stayed behind (device, 2026-08-28). As an anchor
+  //    trigger with offset 0 ("na dan") it moves with the date like everything else.
+  if (statedMonthDay) {
+    const anchorT = triggers.find((t) => t.type === 'anchor' && t.anchor_month_day === statedMonthDay);
+    const sameDay = (iso: string) => {
+      const d = new Date(iso);
+      return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === statedMonthDay;
+    };
+    if (anchorT && triggers.some((t) => t.type === 'time' && t.iso_datetime && sameDay(t.iso_datetime))) {
+      triggers = triggers.filter((t) => !(t.type === 'time' && t.iso_datetime && sameDay(t.iso_datetime)));
+      if (!triggers.some((t) => t.type === 'anchor' && t.offset_days === 0)) {
+        triggers.push({
+          type: 'anchor',
+          certainty: 'high',
+          label: offsetLabel(0, labelLang),
+          anchor_person: anchorT.anchor_person,
+          anchor_kind: anchorT.anchor_kind,
+          anchor_month_day: statedMonthDay,
+          offset_days: 0,
+        });
+      }
+    }
+  }
+
+  // ── E23: SAME DAY → exactly two reminders, an hour before and at the moment (Marko, 2026-08-28). A birthday
+  //    "večeras u 8" had produced four: −21/−7/−1 rolled into next year and "na dan" sat at the default 09:00,
+  //    already past. The chain is for things ahead; for tonight it is noise. Applies to tasks the same way
+  //    ("sastanak danas u 15h" → 14:00 and 15:00). The anchor goes too — its day-of reminder cannot carry the
+  //    stated hour, and two is the number. (Consequence: a same-day birthday does not create a yearly anchor.)
+  const todayRelative = primary?.type === 'relative' && primary.days === 0 && !primary.weeks && !primary.months && !primary.years;
+  const sameDay = primary != null && ((resolved?.fireAt != null && startOfDay(resolved.fireAt) === startOfDay(ctx.now)) || todayRelative);
+  if (sameDay) {
+    let moment: number | null = resolved?.fireAt ?? null;
+    if (moment == null || startOfDay(moment) !== startOfDay(ctx.now)) {
+      if (primary.type === 'relative' && primary.hour != null) {
+        // A STATED hour that has already passed today ("sastanak danas u 15", written at 17:00): the event is over.
+        // Nothing to remind, and nothing to invent — an 18:00 that nobody asked for was worse than no reminder.
+        moment = null;
+      } else {
+        // "danas" with no hour, and the default hour has passed (the resolver rolled it to tomorrow): the next full
+        // hour today, never after 21:00 — hard rule 6.
+        const d = new Date(ctx.now);
+        d.setMinutes(0, 0, 0);
+        d.setHours(d.getHours() + 1);
+        moment = d.getHours() <= 21 ? d.getTime() : null;
+      }
+    }
+    triggers = triggers.filter((t) => t.type !== 'time' && t.type !== 'anchor');
+    needs_anchor = null;
+    if (moment != null) {
+      const hourBefore = moment - 60 * 60 * 1000;
+      if (hourBefore > ctx.now) {
+        triggers.push({ type: 'time', certainty: 'high', label: labelLang === 'hr' ? 'sat prije' : 'an hour before', iso_datetime: toLocalIsoTemporal(hourBefore) });
+      }
+      // "u to vrijeme", not "danas": next to a time that is already today, "danas" said nothing (Marko).
+      triggers.push({ type: 'time', certainty: 'high', label: labelLang === 'hr' ? 'u to vrijeme' : 'at the time', iso_datetime: toLocalIsoTemporal(moment) });
+    }
   }
 
   // ── semantic: always present, union of everything we and the model saw. The model's entity keywords count

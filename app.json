@@ -24,7 +24,11 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": true,
       "permissions": [
-        "android.permission.READ_CONTACTS"
+        "android.permission.READ_CONTACTS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -57,10 +61,28 @@
           "resizeMode": "contain",
           "backgroundColor": "#D7EC7C"
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#D7EC7C",
+          "sounds": [
+            "./assets/sound/ding.wav"
+          ],
+          "defaultChannel": "reminders-v1"
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c63bb827-613a-4127-8699-af81ba9aa9c6"
+      }
+    },
+    "owner": "mprtenja"
   }
 }

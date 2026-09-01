@@ -7,6 +7,7 @@
 //
 //   before:  "Kad je Martiov rođendan?"     "Martiov rođendan · 3 tjedna prije"
 //   after:   "Kad je rođendan — Marti?"     "Rođendan · Marti · 3 tjedna prije"
+//   2026-08-28: the Croatian question dropped the name altogether — "Kad je rođendan?" — the card shows the note.
 
 import type { AnchorKind, Language } from '../types';
 
@@ -25,11 +26,12 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** The date question. "Kad je rođendan — Marti?", "Kad je godišnjica braka?", "When is Sarah's birthday?" */
+/** The date question. "Kad je rođendan?", "Kad je godišnjica braka?", "When is Sarah's birthday?" */
 export function anchorQuestionFor(person: string, kind: AnchorKind, lang: Language): string {
   if (person === MARRIAGE_PERSON) return lang === 'hr' ? 'Kad je godišnjica braka?' : 'When is your wedding anniversary?';
   if (lang === 'en') return `When is ${person}'s ${kindNoun(kind, 'en')}?`;
-  return `Kad je ${kindNoun(kind, 'hr')} — ${person}?`;
+  // No name at all in Croatian (Marko, 2026-08-28): the card already shows the note, and "— Branki?" read as clutter.
+  return `Kad je ${kindNoun(kind, 'hr')}?`;
 }
 
 /** The anchor's own label, shown in "Datumi" and on every bound reminder. "Rođendan · Marti". */

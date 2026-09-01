@@ -28,6 +28,7 @@ export interface Palette {
   onAccent: string;
   signal: string; // amber — ONLY for surfacing
   signalSoft: string;
+  signalBorder: string; // hairline on the surfacing card and the signal button — never a literal in a component
   danger: string;
   /** Tinted danger ground — destructive rows, the swipe-to-delete backdrop. */
   dangerSoft: string;
@@ -75,6 +76,7 @@ export const DEEP: Theme = {
     onAccent: '#14160E', // dark text ON lime — the accent is light, so this must be too
     signal: '#F5B23D',
     signalSoft: 'rgba(245,178,61,0.16)',
+    signalBorder: 'rgba(245,178,61,0.35)',
     danger: '#FF6B6B',
     dangerSoft: 'rgba(255,107,107,0.16)',
     onOrb: '#FFFFFF',
@@ -110,6 +112,7 @@ export const PAPER: Theme = {
     onAccent: '#FFFFFF',
     signal: '#B8770F',
     signalSoft: 'rgba(184,119,15,0.14)',
+    signalBorder: 'rgba(184,119,15,0.35)',
     danger: '#C93B3B',
     dangerSoft: 'rgba(201,59,59,0.12)',
     onOrb: '#FFFFFF',

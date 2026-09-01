@@ -68,7 +68,7 @@ export function SurfacingCard({ item, now, index, onReact }: Props) {
 
   return (
     <Animated.View style={cardStyle}>
-      <Glass radius={R.xxl} borderColor="rgba(245,178,61,0.35)" style={{ shadowColor: t.c.signal, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 } }}>
+      <Glass radius={R.xxl} borderColor={t.c.signalBorder} style={{ shadowColor: t.c.signal, shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 } }}>
         <Animated.View pointerEvents="none" style={[styles.hair, { backgroundColor: t.c.signal }, hairStyle]} />
         <View style={styles.inner}>
           <Pressable onPress={() => router.push({ pathname: '/note/[id]', params: { id: note.id } })} accessibilityRole="button" accessibilityLabel={`${why}. ${note.summary ?? note.rawText}`}>

@@ -1,4 +1,4 @@
-// Anchor flow: answer "Kad je rođendan — Ana?" → create/update anchor → bind every
+// Anchor flow: answer "Kad je rođendan?" → create/update anchor → bind every
 // pending anchor trigger (this note AND any other note about the same person).
 
 import { db, type Db } from '@/db';
@@ -12,6 +12,7 @@ import { notifyChange } from '@/lib/events';
 import { DEFAULT_ANCHOR_TIME, DEFAULT_CHAINS, offsetLabel, resolveAnchorTrigger } from '@/domain/triggers/resolve';
 import { anchorLabelFor } from '@/domain/enrich/labels';
 import { draftToTrigger } from '@/domain/mutations';
+import { dayOfTimeMutations } from '@/domain/anchorTime';
 import { applyMutations } from '@/db/applyMutations';
 import { prefsRepo } from '@/db/repositories/prefs';
 import type { Anchor, AnchorKind, AnchorPayload } from '@/domain/types';
@@ -26,6 +27,12 @@ export interface AnswerAnchorInput {
   year?: number | null; // oneoff only
   source?: Anchor['source'];
   contactId?: string | null;
+  /**
+   * A time the user chose along with the date (optional in the picker). When given, every reminder bound to this
+   * anchor in the note takes that hour — "da se podsjetnici vrte oko toga" (Marko, 2026-08-28). Without it, the
+   * default hour stays.
+   */
+  at?: AnchorPayload | null;
 }
 
 export function anchorLabel(person: string, kind: AnchorKind, lang: 'hr' | 'en' = 'hr'): string {
@@ -94,6 +101,13 @@ export async function answerAnchor(input: AnswerAnchorInput): Promise<Anchor> {
     }
   }
 
+  // The user chose a time with the date. Only the DAY-OF reminder takes it (Marko: "samo je bitan onaj u tom trenu
+  // na taj dan"); the lead reminders keep their hour. The day-of reminder is created when the chain had none.
+  if (input.at) {
+    const all = await triggersRepo.byNote(d, input.noteId);
+    await applyMutations(input.noteId, dayOfTimeMutations(all, anchor, input.at, clock, lang), 'manual');
+  }
+
   await clearAnchorQuestion(note);
 
   notifyChange('anchors', 'triggers', 'notes');
@@ -125,7 +139,7 @@ async function bindPendingTriggers(anchor: Anchor) {
   }
 }
 
-/** Skip the question — keep the note ("Samo zapamti"). Pending anchor triggers are dropped. */
+/** Skip the question — keep the note ("Bez podsjetnika" / "Preskoči pitanje"). Pending anchor triggers are dropped. */
 export async function dismissQuestions(noteId: string) {
   const d = db();
   const now = clock.now();

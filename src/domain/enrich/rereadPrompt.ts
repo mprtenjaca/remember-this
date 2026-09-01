@@ -10,10 +10,13 @@
 
 /** Word-level difference, 0 (identical) → 1 (nothing in common). */
 export function textDistance(before: string, after: string): number {
+  // Case, punctuation and diacritics are not words: "odlican" → "odličan" is the same note, better spelled.
   const norm = (s: string) =>
     s
       .toLowerCase()
-      .replace(/[.,;:!?()"„”]/g, ' ')
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/[.,;:!?()"„”—–-]/g, ' ')
       .split(/\s+/)
       .filter(Boolean);
 
@@ -44,29 +47,33 @@ export interface RereadDecision {
   /** Ask the user whether to re-read. */
   ask: boolean;
   /** Why — shown to nobody, but it makes the tests read like the rule. */
-  reason: 'unchanged' | 'trivial' | 'substantial' | 'meaning-words-changed';
+  reason: 'unchanged' | 'trivial' | 'changed' | 'substantial' | 'meaning-words-changed';
 }
 
-/** How different the text must be before it is worth asking. Below this, the edit is a typo fix. */
+/** Above this the edit is a rewrite, not a correction — kept for the reason label and the tests. */
 export const REREAD_THRESHOLD = 0.34;
 
 /**
  * Decide whether an edit to the note's own text should offer a re-read.
  * Editing only the TITLE never triggers this — the title is a label, not the source of the reasoning.
+ *
+ * Marko, 2026-08-28: offer it whenever a WORD changed, not only past a threshold — the offer is one tap to
+ * decline, while an unoffered re-read after a real change left reminders reasoned from text that no longer
+ * exists. Only spelling, case, punctuation and diacritics stay quiet: those change no word.
  */
 export function shouldOfferReread(before: string, after: string): RereadDecision {
   const a = before.trim();
   const b = after.trim();
   if (a === b) return { ask: false, reason: 'unchanged' };
 
-  // A word that drives the reasoning appeared or disappeared → ask even if the edit is small.
+  const distance = textDistance(a, b);
+  if (distance === 0) return { ask: false, reason: 'trivial' };
+
+  // A word that drives the reasoning appeared or disappeared — the reason worth naming.
   // ("nazvati Marka" → "nazvati Marka sutra" is four characters and changes everything.)
   const beforeHas = MEANINGFUL.test(a);
   const afterHas = MEANINGFUL.test(b);
-  const meaningMoved = beforeHas !== afterHas || (afterHas && textDistance(a, b) > 0.15);
-  if (meaningMoved) return { ask: true, reason: 'meaning-words-changed' };
+  if (beforeHas !== afterHas || (afterHas && distance > 0.15)) return { ask: true, reason: 'meaning-words-changed' };
 
-  return textDistance(a, b) >= REREAD_THRESHOLD
-    ? { ask: true, reason: 'substantial' }
-    : { ask: false, reason: 'trivial' };
+  return { ask: true, reason: distance >= REREAD_THRESHOLD ? 'substantial' : 'changed' };
 }

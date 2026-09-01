@@ -11,7 +11,13 @@ interface Props {
   lang?: 'hr' | 'en';
 }
 
-/** 👍 / "ne sad" / 👎 (+ ✓ for gifts/tasks). Feeds surfacings.reaction → adaptive threshold. */
+/**
+ * Two answers to a card that came back, never four (Marko, 2026-08-28): the positive one — "Riješeno" when the
+ * reminder is an errand (this reminder only; the note follows when it was the last), "Korisno" when it is just
+ * information — and "Ne treba mi", which tells the scorer it was wrong to bring it back. "Ne sad" went: the
+ * cooldown already re-shows a note later, and a snooze next to "done" only made people wonder which to tap.
+ * Feeds surfacings.reaction → adaptive threshold.
+ */
 export function ReactionBar({ onReact, showDone, lang = 'hr' }: Props) {
   const hr = lang === 'hr';
   return (
@@ -27,10 +33,10 @@ export function ReactionBar({ onReact, showDone, lang = 'hr' }: Props) {
           }}
           haptic={false}
         />
-      ) : null}
-      <Button title={hr ? 'Korisno' : 'Useful'} size="sm" variant="soft" onPress={() => onReact('useful')} />
-      <Button title={hr ? 'Ne sad' : 'Not now'} size="sm" variant="ghost" onPress={() => onReact('not_now')} />
-      <Button title={hr ? 'Krivo' : 'Wrong'} size="sm" variant="ghost" onPress={() => onReact('wrong')} />
+      ) : (
+        <Button title={hr ? 'Korisno' : 'Useful'} size="sm" variant="primary" onPress={() => onReact('useful')} />
+      )}
+      <Button title={hr ? 'Ne treba mi' : 'Not needed'} size="sm" variant="ghost" onPress={() => onReact('wrong')} />
     </View>
   );
 }

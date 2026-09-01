@@ -78,6 +78,7 @@ ostavi needs_anchor null i ne pitaj.
 5. PITANJA — najviše 2, i samo ono što je stvarno nemoguće izvesti
 Svako pitanje ima 2–4 kratke tap-opcije; iznimka je kind "date" (koristi se date picker, bez opcija).
 Nikad ne pitaj: vrijeme, sat, "kada ti odgovara", lead time ("koliko unaprijed") — to dolazi iz PREFS ili defaulta.
+Nikad ne pitaj TKO je osoba ("čiji je rođendan", "za koga") — ime nije potrebno za podsjetnik.
 Ne pitaj podatak koji nije nužan za okidač (adresa, cijena, "kad ćeš opet ići").
 "Ana želi Dyson fen za rođendan" → 1 date pitanje ako Ana nije u ANCHORS, inače 0.
 

@@ -458,6 +458,23 @@ describe('a month named by number or name, with a weekend or a day', () => {
     expect(at('Platiti u 9. misecu')).toBe('2026-09-01 09:00');
   });
 
+  // Dictation writes no ordinal dot: "u 10 misecu" is October just as "u 10. misecu" is. The locative ending
+  // ("misecu", not "miseci") is what separates it from a duration. Device note, 2026-08-28: this landed on the
+  // first Wednesday of SEPTEMBER at 10:00 — the "10" was read as an hour and the month was lost.
+  it('"u 10 misecu u prvu sridu" without the dot is the first Wednesday of October, default hour', () => {
+    expect(at('U 10 misecu u prvu sridu iman sastanak')).toBe('2026-10-07 09:00');
+  });
+
+  it('"u 10 misecu" without the dot is the 1st of October, not 10 o\'clock tomorrow', () => {
+    expect(at('Platiti u 10 misecu')).toBe('2026-10-01 09:00');
+    expect(at('Platiti u 10 mjesecu')).toBe('2026-10-01 09:00');
+  });
+
+  it('the dotless form does not swallow durations or clock times', () => {
+    expect(parseTemporal('Servis za 10 miseci', NOW)[0]?.type).toBe('relative');
+    expect(at('Sastanak sutra u 10')).toBe('2026-08-26 10:00');
+  });
+
   it('"prvi vikend u srpnju" is the same as the numeric form', () => {
     expect(at('Prvi vikend u srpnju')).toBe('2027-07-03 09:00');
   });
@@ -506,5 +523,30 @@ describe('nth weekday: the month comes from the sentence', () => {
 
   it('"za 2 miseca" alone is still a plain relative date', () => {
     expect(at('Za 2 miseca platiti')).toBe('2026-10-25 09:00');
+  });
+});
+
+// Spoken half-hours (device session 2026-08-28): "u pola 9" was read as 09:00 and "u 9 i 30" as 09:00.
+describe('half-hours the way people say them', () => {
+  it('"u pola 9" is 8:30 — half an hour before nine', () => {
+    expect(at('Sastanak sutra u pola 9')).toBe('2026-08-26 08:30');
+  });
+
+  it('"u pola 3" follows the bare-hour rule: the afternoon one', () => {
+    expect(at('Sastanak sutra u pola 3')).toBe('2026-08-26 14:30');
+  });
+
+  it('"u 9 i pol" and "u 9 i 30" are 9:30', () => {
+    expect(at('Sastanak sutra u 9 i pol')).toBe('2026-08-26 09:30');
+    expect(at('Sastanak sutra u 9 i 30')).toBe('2026-08-26 09:30');
+  });
+
+  it('a part of the day still decides: "u pola 9 navečer" is 20:30', () => {
+    expect(at('Sastanak sutra u pola 9 navečer')).toBe('2026-08-26 20:30');
+  });
+
+  it('"pola" that is not a time is left alone', () => {
+    expect(parseTemporal('Napravljeno pola posla', NOW)).toEqual([]);
+    expect(parseTemporal('Kontrola za pola godine', NOW)[0]?.type).not.toBe('time_only');
   });
 });

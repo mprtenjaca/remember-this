@@ -220,3 +220,42 @@ describe('the whole pipeline keeps the parsed instant', () => {
     expect(fireOf('Sljedeći tjedan u sridu u 14 nazvati popa')).toBe('2026-09-02 14:00');
   });
 });
+
+// "za N tjedna u <dan>" — the weekday INSIDE the week N weeks ahead. Device, 2026-08-28: "za 2 tjedna u subotu"
+// resolved to Friday 11.9. (today + 14) because the two signals never met; "za dva tjedna" (words) was not a
+// number at all and fell through to the coming Saturday.
+describe('N weeks + weekday', () => {
+  it('"za 2 tjedna u subotu" on Fri 28.8. is Sat 12.9., not Fri 11.9. and not Sat 29.8.', () => {
+    expect(at('Branki je rođendan za 2 tjedna u subotu', AUG28)).toBe('2026-09-12 09:00');
+  });
+
+  it('spoken numbers count: "za dva tjedna u subotu" is the same day', () => {
+    expect(at('Branki je rođendan za dva tjedna u subotu', AUG28)).toBe('2026-09-12 09:00');
+  });
+
+  it('"za 3 tjedna u ponedjeljak" is the Monday three weeks from this week', () => {
+    expect(at('Sastanak za 3 tjedna u ponedjeljak', AUG28)).toBe('2026-09-14 09:00');
+  });
+
+  it('"sljedeći tjedan u subotu" is unchanged — next week, not a week count', () => {
+    expect(at('Roštilj sljedeći tjedan u subotu', AUG28)).toBe('2026-09-05 09:00');
+  });
+
+  it('a bare week count without a weekday is still today + 7N', () => {
+    expect(at('Servis za 2 tjedna', AUG28)).toBe('2026-09-11 09:00');
+    expect(at('Servis za dva tjedna', AUG28)).toBe('2026-09-11 09:00');
+  });
+});
+
+describe('numbers written as words before a unit', () => {
+  it('days, weeks and hours', () => {
+    expect(at('Nazvati za tri dana', AUG28)).toBe('2026-08-31 09:00');
+    expect(at('Servis za pet tjedana', AUG28)).toBe('2026-10-02 09:00');
+    expect(at('Sutra u pet sati', AUG28)).toBe('2026-08-29 17:00');
+  });
+
+  it('"pet" the weekday stem and "tri" without a unit are left alone', () => {
+    expect(at('Nazvati u petak', AUG28)).toBe('2026-09-04 09:00');
+    expect(parseTemporal('Kupiti tri karte', AUG28)).toEqual([]);
+  });
+});
