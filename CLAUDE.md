@@ -13,8 +13,12 @@ The user organizes nothing — the app decides **when** something matters again.
 
 ## Current phase
 
-> **PHASE A → the iOS dev build RUNS on a phone (2026-09-01, Metro-connected).** EAS project `c63bb827…`,
-> owner `mprtenja`, bundle `com.mp.rememberthis`. Workflow: `npm start`, open THAT app, not Expo Go.
+> **PHASE A → two iOS builds now run on the phone.** EAS project `c63bb827…`, owner `mprtenja`, bundle
+> `com.mp.rememberthis`. **`development`** (`npm run build:dev:ios`) needs Metro: `npm start`, open THAT app,
+> not Expo Go — it carries `__DEV__`, so the debug timeline (time travel, "Test obavijest (10 s)", seed) exists
+> only here. **`preview`** (`npx eas build --profile preview --platform ios`) is standalone: no Metro, ad-hoc
+> signed for registered devices, `EXPO_PUBLIC_AI_PROXY_URL` baked in by EAS env → dictation and the AI ladder
+> work, but `__DEV__` is false so there is **no time travel and no test notification** (Marko's call, 2026-09-03).
 > Native notifications, geofencing, Skia and background tasks **cannot be tested in Expo Go**. Everything
 > touching them goes through an adapter that picks the real implementation outside Expo Go and a mock inside it
 > (`inExpoGo`; see `docs/03-NATIVE.md`). Expo Go supports up to SDK 54 — stay on `expo@~54`.
@@ -33,20 +37,23 @@ Only open work is listed. Finished areas live in git history and `docs/records/`
 | M2 Capture + Today | In progress | Implemented and device-tested. Open: the manual acceptance list in `docs/00-PLAN.md` (airplane-mode capture, p95 save→close < 150 ms). "Iz kontakata" on the date question is parked (`OFFER_CONTACTS = false` in `ClarifyCard`), as is "Novo" on Today (`SHOW_NOVO`). |
 | Temporal parsing | Mostly closed | The 2026-08-28 sweep is largely fixed (2026-09-01): rok spans (both word orders), iza/poslije hours, ponoć, za N minuta/sati, recurrence incl. ikavica + stated hour, identifiers never dates, dialect birthday slang (roćkas/rođus). **Still failing — see Next Step 2.** |
 | Brand assets | Store graphics to do | Icon/splash/favicon/notification icon all render from `npm run brand`. The dev build ran 2026-09-01 — confirm the icon and splash actually look right on the phone. Store graphics (C2 at store sizes) still to do. |
-| M4 Notifications | Scheduling works on device, delivery unverified | First device run (2026-09-01) crashed on `categoryIdentifier: undefined` — fixed (a payload key must be ABSENT, not undefined; `domain/notificationCategory.ts`). Reminders schedule on the phone now. **Still unverified**: the background delivery checklist (ding, bulb glyph, tap→note, kill+reopen rehydration) via debug timeline "Test obavijest (10 s)", app BACKGROUNDED. New and also untested on device: foreground banner now plays the ding, and the **question push** (`questionPush.ts` — enrich ends in a question while backgrounded → notification, tap → Danas, answered in app → tray cleared). |
+| M4 Notifications | Scheduling works on device, delivery unverified | First device run (2026-09-01) crashed on `categoryIdentifier: undefined` — fixed (a payload key must be ABSENT, not undefined; `domain/notificationCategory.ts`). Reminders schedule on the phone now. **Still unverified**: the background delivery checklist (ding, bulb glyph, tap→note, kill+reopen rehydration), app BACKGROUNDED. New and also untested on device: foreground banner now plays the ding, and the **question push** (`questionPush.ts` — enrich ends in a question while backgrounded → notification, tap → Danas, answered in app → tray cleared). The `preview` build is now the way to test all of it standalone (2026-09-03) — but it has no "Test obavijest (10 s)", so use real short notes ("sastanak za 2 minute"). |
 
 ### Next Step
 
-1. **The device verification pass** (the build runs; the checklist does not verify itself). With the app
-   BACKGROUNDED: debug timeline → "Test obavijest (10 s)" — ding, bulb glyph in the status bar, tap → note.
-   Then a real one: "sastanak za 2 minute", background, wait. Kill + reopen → queue survives (rehydration).
-   New in this pass: **foreground banner now dings** (write a note, stay in the app), the **question push**
+1. **The device verification pass** (the build runs; the checklist does not verify itself). Everything below is
+   ready to run — `npm run build:preview:ios` gives a standalone build with the proxy URL baked in, so this is
+   the first build where dictation and the AI ladder work off Metro.
+   With the app BACKGROUNDED: write "sastanak za 2 minute", background, wait → ding, bulb glyph in the status
+   bar, tap → note. Kill + reopen → queue survives (rehydration).
+   Also in this pass: **foreground banner now dings** (write a note, stay in the app), the **question push**
    (dictate "Marta želi bicikl", background immediately → notification with the question, tap → Danas, answer →
    tray entry gone), the **rok pair** ("platit kaznu u roku 8 dana" → dan prije + na dan), auto-resolve
-   (answer a surfaced card → its reminder ticks itself), and the "Kako ovo radi" drawer look.
-   **The proxy URL is not in the build** — EAS has no env vars for the `development` environment, so a build run
-   without Metro is offline (heuristic only, no dictation). Fix with `eas env:create` when a standalone build is
-   needed.
+   (answer a surfaced card → its reminder ticks itself), the "Kako ovo radi" drawer look, and **dictation
+   itself** (never yet run on a build without Metro).
+   **What `preview` cannot do:** no `__DEV__`, so no time travel and no "Test obavijest (10 s)". The birthday
+   chain (−21d/−7d/−1d) and the yearly anchor need the `development` build (`npm run build:dev:ios` + `npm start`)
+   — verifying them on `preview` would mean waiting weeks.
 
 2. **Cases that still do NOT work** (all reproduced 2026-09-01; each wants a test in
    `device-2026-09-01.test.ts` first):
@@ -56,6 +63,8 @@ Only open work is listed. Finished areas live in git history and `docs/records/`
      interval question instead of the season.
    - **"Slava je na Nikoldan" → nothing** — `knownDates` has no Nikoldan (19.12.).
    - **"za tri i po tjedna kontrola" → nothing** — fractional units ("i po" on weeks/months) are unparsed.
+     Only the fraction is broken: re-probed 2026-09-03, **"za tri tjedna kontrola u srijedu" works** and returns
+     one compound signal (`weekday: 3, occurrence: 'next', weeksAhead: 3` → 23.9.2026), word-number and all.
    - **"Kupit poklon za vjenčanje 20.6." asks "Kad je rođendan?"** — a wedding is not a birthday and the date
      is in the text. **"Zapamti da Ana voli lavandu" asks too** — a fact to recall, not an errand. Both are OUR
      heuristic's gift→birthday reflex, so E24 cannot catch them; they are also the bulk of the harness's
@@ -233,8 +242,14 @@ GEMINI_KEY=... npm run p0     # direct Gemini
 npm run worker:dev            # wrangler dev (in worker/)
 cd worker && npm run deploy   # after changing wrangler.toml [vars] or src/index.ts
 npm run brand                 # re-render icon/splash/favicon/notification PNGs (needs `npm install` in scripts/brand once)
-npm run build:dev             # EAS dev build (Android apk) — the only way to test notifications; :ios for iPhone
+npm run build:dev             # EAS dev build (Android apk) — needs Metro; :ios for iPhone
                               # after installing: `npm start`, then open the DEV app (not Expo Go) and scan
+                              # this is the build WITH __DEV__ → time travel + "Test obavijest (10 s)"
+npm run build:preview:ios     # standalone iOS (ad-hoc, no Metro). Dictation + AI ladder work (proxy URL comes
+                              # from EAS env, not .env); no __DEV__ → no debug timeline. Registers device UDIDs.
+npx eas env:list --environment preview        # verify EXPO_PUBLIC_AI_PROXY_URL is set for a profile
+npx eas env:create --environment preview \    # ...and how it got there (--visibility plaintext: it is only a URL)
+  --name EXPO_PUBLIC_AI_PROXY_URL --value https://remember-this-ai.mpcodebase.workers.dev --visibility plaintext
 ```
 
 ---
@@ -243,6 +258,7 @@ npm run build:dev             # EAS dev build (Android apk) — the only way to 
 
 | Date | Decision | Why |
 |---|---|---|
+| 2026-09-03 | **`preview` is the standalone test build, and it stays without debug tools.** `eas.json` `preview` gained `ios.simulator: false`; `EXPO_PUBLIC_AI_PROXY_URL` lives in EAS env per environment (`--visibility plaintext`), NOT in the build from `.env`. The `__DEV__` gate on the debug timeline was deliberately left alone after being offered a channel-based gate | Marko's call: debug tools have no business in anything but a development build. Cost, accepted knowingly: `preview` cannot time-travel, so the birthday chain and yearly anchor must be verified on the `development` build instead. `.env` is a Metro-time file — a standalone build reads env only from EAS, which is why the earlier dev build was offline (heuristic, no dictation). |
 | 2026-09-01 | **The Gemini ladder is walked BEST-FIRST** (`GEMINI_MODELS` in `wrangler.toml`): four 20-RPD Flash rungs with **thinking ON**, then the two 500-RPD Lites, then Groq (`reasoning: high`), then the heuristic. 404 skips one rung; other 4xx stop the chain. Supersedes "lite leads because 20/day cannot carry a day" — four stacked 20/day pools can | Each rung is its own quota pool, so best-first costs nothing. Thinking is free where REQUESTS are the scarce resource (250K TPM vs 20 RPD) — but Gemini 3.x spends `maxOutputTokens` on thinking FIRST, so the cap went 1200 → 3000 after a probe returned `content: {}` / `finishReason: MAX_TOKENS` (HTTP 200, no JSON — the silent-failure class). See `docs/records/2026-09-01-third-device-session.md`. |
 | 2026-09-01 | **A payload key crossing a native bridge is ABSENT, never `undefined`.** `categoryIdentifier: undefined` crashed every non-gift reminder on the first device run ("Cannot cast 'nil'"); `expo.ts` spreads optional keys in conditionally, and the rule lives in `domain/notificationCategory.ts` with tests | JS treats `{k: undefined}` and "no k" the same; iOS does not. Grep for `: undefined` in anything OS-bound. |
 | 2026-09-01 | **E24: an occasion nobody mentioned is never asked about** — the model's `needs_anchor` survives only when the TEXT implies the occasion (occasion word, memorial/marriage, gift marker). Slang counts as text: `fold()` maps roćkas/rođus/rodjus → rodendan, one mapping teaching every folded pattern | "Piće s Ivanom" was asked "Kad je rođendan?" — the model saw a name and reached for the birthday a name implies. Then "Marko rockas" showed the other edge: E24 stripped a CORRECT model anchor because our vocabulary lacked the dialect word. Teach vocabulary in fold(), never weaken the rule. |
@@ -256,7 +272,6 @@ npm run build:dev             # EAS dev build (Android apk) — the only way to 
 | 2026-08-25 | **"Riješeno" is one concept at two levels**; the semantic trigger is neither tickable nor deletable. **2026-08-28:** "✓ Riješeno" on the resurfaced card is the REMINDER level (that trigger only; the note archives itself only when it was the last one) — it used to close the whole note. The card has two answers: Riješeno/Korisno and "Ne treba mi". A done or fired reminder keeps showing its time, faded (`fireAt ?? lastFiredAt`) | A note holds several errands. The semantic trigger is what makes it findable in six months, so it survives being done. See `docs/records/2026-08-25-device-session-ux.md`. |
 | 2026-08-25 | UI language follows the DEVICE (`ui/theme/locale.ts`), never the note | A Croatian phone showed "next week" inside a Croatian note. The note's own language is still stored for the model and for dictation, but no label reads from it. |
 | 2026-08-25 | Names are never inflected: label "Rođendan · Marti"; the Croatian question carries **no name at all** — "Kad je rođendan?" (2026-08-28, was "Kad je rođendan — Marti?") | Approximating the Croatian possessive produced "Martiov"/"Lukin". Asking generally is correct for every name; the clarify card shows the note, so the dash-name read as clutter. Migration 002 rewrites existing labels. |
-| 2026-08-25 | Wedding anniversary anchors to the pseudo-person `Brak` | The note names no spouse; guessing produced nonsense questions ("Kad je Zadruov godišnjica?"). |
 | 2026-08-28 | **Low certainty never gates delivery.** It shows a sparkles icon (gone once `user_edited`), orders same-day competitors, and weighs 0.2 in surfacing score — the push fires either way | An earlier claim of mine that it suppressed pushes was wrong. A guessed deadline is also always WRITTEN; the one-tap correction (`kind: 'interval'`) is offered only when the category has no rhythm. See the record. |
 | 2026-08-28 | **Same day → exactly two reminders: an hour before and at the moment** (`reconcile` E23), for occasions and tasks alike; the anchor chain and the anchor itself are dropped for a same-day occasion. "Danas" with no hour whose default hour has passed → the next full hour, never after 21:00. **A bare hour 1–11 whose morning reading has passed means the evening one** ("danas u 10" at 17:00 = 22:00; resolver, `temporal.ts`). **A stated hour that has genuinely passed today is an event that is over** — no reminder and nothing invented (an 18:00 nobody asked for was the bug). Also: `statedOccasionDate()` counts a relative DAY on the calendar, not through the resolver (which rolls "danas" to tomorrow once the hour passed) | Device: a birthday "večeras u 8" produced FOUR reminders — −21/−7/−1 rolled into 2027 and "na dan" sat at the default 09:00, already past. Known cost: a same-day birthday creates no yearly anchor (its day-of reminder cannot carry the stated hour, and two is the number). |
 | 2026-08-28 | **Whisper's `prompt` is a style SAMPLE, not an instruction.** The app's Croatian instruction block ("Transkribiraj govor DOSLOVNO…") was being forwarded as that prompt, so the decoder imitated its wording and register and Croatian came out garbled. Only a part explicitly marked `voicePrompt: true` (the note text so far) reaches it now, behind a short natural-sounding Croatian example; the instructions still go to Gemini, which does read them. Recording is mono (Whisper downmixes anyway — the second channel only doubled the upload) | Device: "prepoznavanje glasa na hrvatskom radi očajno". The provider was never the problem — `GEMINI_TRANSCRIBE = ""` means transcription already went to Whisper. |

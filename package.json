@@ -15,7 +15,8 @@
     "worker:deploy": "npm --prefix worker run deploy",
     "brand": "node scripts/brand/render.mjs",
     "build:dev": "eas build --profile development --platform android",
-    "build:dev:ios": "eas build --profile development --platform ios"
+    "build:dev:ios": "eas build --profile development --platform ios",
+    "build:preview:ios": "eas build --profile preview --platform ios"
   },
   "dependencies": {
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",
