@@ -7,7 +7,7 @@ import type { Anchor, AnchorKind, EnrichResult, EnrichTrigger, Intent, Language 
 import { findAnchor, MARRIAGE_PERSON } from './ingest';
 import { formatMonthDay } from '../triggers/resolve';
 import { findKnownDate } from './knownDates';
-import { parseTemporal, resolveSignal } from './temporal';
+import { looksLikeIdentifier, parseTemporal, resolveSignal } from './temporal';
 import { offsetLabel } from '../triggers/resolve';
 
 export interface HeuristicContext {
@@ -225,7 +225,16 @@ export function extractTime(text: string, now: number, lang: Language): TimeHit 
   return { iso: localIso(d), certainty: hour != null ? 'high' : 'medium', label: label || (lang === 'hr' ? 'u to vrijeme' : 'at that time') };
 }
 
-/** Strip Croatian diacritics so "rodendan", "rodjendan" and "rođendan" all match. Used for pattern tests only. */
+/**
+ * Strip Croatian diacritics so "rodendan", "rodjendan" and "rođendan" all match. Used for pattern tests only.
+ *
+ * Also the one place slang vocabulary is normalized: "roćkas" and "rođus" (casual Dalmatian for a birthday)
+ * become "rodendan" here, so every folded pattern — BIRTHDAY, GIFT_MARKERS, reconcile's occasionWord and E24's
+ * occasionImplied — learns the word at once. On the device "Marko rockas" produced no question on either path:
+ * the heuristic did not know the word, and E24 stripped the model's (correct!) anchor because the raw text
+ * carried no occasion word our rules recognized. Teaching eight regexes separately is how they drift apart.
+ * The replacement keeps case endings working: "roćkasa" → "rodendana", "rođusu" → "rodendanu".
+ */
 export function fold(s: string): string {
   return s
     .toLowerCase()
@@ -233,7 +242,9 @@ export function fold(s: string): string {
     .replace(/dj(?=endan)/g, 'd') // rodjendan → rodendan
     .replace(/[čć]/g, 'c')
     .replace(/š/g, 's')
-    .replace(/ž/g, 'z');
+    .replace(/ž/g, 'z')
+    .replace(/\brockas/g, 'rodendan') // roćkas / ročkas — ć/č already folded to c above
+    .replace(/\brodj?us/g, 'rodendan'); // rođus — đ folded to d above; "rodjus" is đ typed as dj, like rodjendan
 }
 
 const BIRTHDAY = /\b(rodendan|birthday|bday)\w*/i; // tested on fold(text)
@@ -354,6 +365,10 @@ export function extractExplicitDate(text: string): { month: number; day: number;
   while ((m = re.exec(text))) {
     const before = text.slice(Math.max(0, m.index - 4), m.index + 1).toLowerCase();
     if (/\b(u|at|od|do)\s$/.test(before + ' ') && !m[3]) continue; // "u 10.30" → time, not date
+    // An identifier is not a date: "Verzija 2.10 ima bug" scheduled 2 October, "Polica osiguranja 12.5 mil"
+    // scheduled 12 May. temporal.ts had refused both since August; this function is the copy that wins for
+    // occasion dates and it had no guard at all. Shared list, so the two cannot drift apart.
+    if (looksLikeIdentifier(text, m.index)) continue;
     const d = Number(m[1]);
     const mo = Number(m[2]);
     if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) return { month: mo, day: d, year: m[3] ? Number(m[3]) : null };

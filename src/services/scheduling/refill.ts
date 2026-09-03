@@ -8,6 +8,7 @@ import { triggersRepo } from '@/db/repositories/triggers';
 import { anchorsRepo } from '@/db/repositories/anchors';
 import { clock } from '@/domain/clock';
 import { clampToWakingHours } from '@/domain/triggers/evaluate';
+import { notificationCategory } from '@/domain/notificationCategory';
 import { fmtRelative } from '@/domain/dates';
 import { scheduler } from '@/services/notifications';
 import { coalesce } from './coalesce';
@@ -74,7 +75,7 @@ async function doRefill(): Promise<RefillStats> {
       fireAt: clampToWakingHours(t.fireAt!),
       title: copy.title,
       body: copy.body,
-      category: note.intent === 'gift' ? 'gift' : undefined,
+      category: notificationCategory(note),
     });
     await triggersRepo.setOsId(d, t.id, osId);
     scheduled++;

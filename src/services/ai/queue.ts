@@ -24,6 +24,7 @@ import { enrichNote } from './enrich';
 import { documentText, embedDocument } from './embed';
 import { EMBED_MODEL } from './prompt';
 import { refillScheduledWindow } from '@/services/scheduling/refill';
+import { maybeNotifyQuestion } from '@/services/notifications/questionPush';
 import { answerAnchor } from '@/services/anchors';
 
 const MAX_ATTEMPTS = 3;
@@ -95,6 +96,18 @@ export async function applyEnrichResult(noteId: string, raw: EnrichResult, sourc
   });
   if (__DEV__) console.log(`[enrich:${source}] ${noteId} → ${out.status}, ${out.drafts.length} triggers, ${out.questions.length} q`);
   notifyChange('notes', 'triggers');
+
+  // Reading ended in a question and the user may already be gone (dictate → pocket the phone): tell them now,
+  // while iOS still runs our JS, instead of letting the question sit invisibly on Danas until the next open.
+  // maybeNotifyQuestion decides for itself (skips Expo Go and a foregrounded app) — see questionPush.ts.
+  if (out.status === 'needs_input' && out.questions[0]) {
+    void maybeNotifyQuestion({
+      noteId,
+      question: out.questions[0].text,
+      summary: out.summary ?? note.rawText,
+      hr: uiLang() === 'hr',
+    });
+  }
 
   // The note stated the date itself ("rođendan 10.6") → create the anchor now, bind the pending drafts, no question.
   if (out.inferredAnchor) {

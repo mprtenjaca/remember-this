@@ -162,10 +162,24 @@ export function buildEnrichBody(rawText: string, ctx: PromptContext) {
       // requests and tokens, not sampling. Determinism where it matters comes from the schema and reconcile(),
       // not from the sampler. Groq's gpt-oss is a different family and keeps its own value in the worker.
       temperature: 1,
-      // Extraction into a fixed schema needs no "thinking"; a budget of 0 is faster and cheaper,
-      // and maxOutputTokens then measures the answer itself (newer models spend budget on thinking first).
-      maxOutputTokens: 1200,
-      thinkingConfig: { thinkingBudget: 0 },
+      // Raised from 1200 when thinking was turned on: on Gemini 3.x this budget covers THINKING FIRST and the
+      // answer second, so a note that makes the model think hard can spend the whole allowance reasoning and
+      // return `content: {}` with finishReason MAX_TOKENS — a 200 OK with no JSON in it, which is this
+      // project's characteristic silent failure. Measured 2026-09-01: a short note spends ~290 thought tokens,
+      // so 1200 left far too little headroom for a long one. TPM is 250K, so the ceiling costs nothing.
+      maxOutputTokens: 3000,
+      // Thinking ON, best-effort (Marko, 2026-09-01). It used to be `thinkingBudget: 0` on the theory that
+      // extraction into a fixed schema is not a reasoning task. On the free tier that traded away the one
+      // resource we have going spare: the Flash rungs are 5 RPM / 250K TPM / **20 RPD** — the binding limit is
+      // REQUESTS, not tokens, so thinking inside a request we already paid for is free capacity.
+      //
+      // And the remaining work genuinely is judgement: intent boundaries, whether a note is a fact or an
+      // errand, who is a person and who is a place. Those are exactly the calls that were coming back wrong.
+      // Time is not in scope either way (hard rule 13), so a deeper read cannot hurt the dates.
+      //
+      // -1 = let the model choose its own depth. The worker strips thinkingConfig for `-lite` models, which
+      // reject it with a 400, so the two Lite rungs of the ladder keep the old no-thinking behaviour.
+      thinkingConfig: { thinkingBudget: -1 },
     },
   };
 }
@@ -182,11 +196,29 @@ export function buildEmbedBody(text: string, taskType: 'RETRIEVAL_DOCUMENT' | 'R
   };
 }
 
-/** Pull the JSON text out of a Gemini generateContent response. */
+/**
+ * Pull the JSON text out of a Gemini generateContent response.
+ *
+ * Names the cause when there is nothing to pull: with thinking enabled, Gemini 3.x spends `maxOutputTokens` on
+ * THINKING FIRST, so a note that makes it reason hard can exhaust the budget and return HTTP 200 with
+ * `content: {}` and `finishReason: MAX_TOKENS`. "empty model response" sent us looking at the network; the real
+ * fix is a bigger ceiling (see buildEnrichBody). Worth the four extra lines — a 200 OK with no content is
+ * exactly the silent failure this project keeps producing.
+ */
 export function extractJsonText(resp: unknown): string {
-  const r = resp as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const r = resp as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+    usageMetadata?: { thoughtsTokenCount?: number };
+  };
   const text = r.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-  if (!text) throw new Error('empty model response');
+  if (!text) {
+    const why = r.candidates?.[0]?.finishReason;
+    const thoughts = r.usageMetadata?.thoughtsTokenCount;
+    if (why === 'MAX_TOKENS' && thoughts) {
+      throw new Error(`empty model response: spent all ${thoughts} output tokens on thinking (raise maxOutputTokens)`);
+    }
+    throw new Error(`empty model response${why ? ` (finishReason: ${why})` : ''}`);
+  }
   return text;
 }
 

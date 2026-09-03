@@ -49,6 +49,14 @@ export function ClarifyCard({ note }: Props) {
   const [done, setDone] = useState(false); // optimistic: hide the card the moment an answer is committed
   const [typing, setTyping] = useState(false);
   const [custom, setCustom] = useState('');
+  // Today at the default hour — the baseline the picker's "did they move the clock?" check compares against.
+  // MUST stay above the `if (!q || done) return null` below: it used to sit further down, so committing an
+  // answer (done = true) rendered one hook fewer and React threw "rendered fewer hooks than expected".
+  const [pickerStart] = useState(() => {
+    const d = new Date();
+    d.setHours(DEFAULT_ANCHOR_TIME.hour, DEFAULT_ANCHOR_TIME.minute, 0, 0);
+    return d;
+  });
 
   useEffect(() => {
     if (pending) return;
@@ -120,12 +128,6 @@ export function ClarifyCard({ note }: Props) {
   };
 
   const openPicker = () => setShowPicker(true);
-  // Today at the default hour — the baseline the picker's "did they move the clock?" check compares against.
-  const [pickerStart] = useState(() => {
-    const d = new Date();
-    d.setHours(DEFAULT_ANCHOR_TIME.hour, DEFAULT_ANCHOR_TIME.minute, 0, 0);
-    return d;
-  });
 
   /** The user typed their own answer instead of picking one of ours. */
   const submitCustom = () => {

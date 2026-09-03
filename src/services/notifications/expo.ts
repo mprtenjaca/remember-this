@@ -25,6 +25,8 @@ const SOUND_FILE = 'ding.wav';
 export interface NotificationData {
   triggerId: string;
   noteId: string;
+  /** 'question' → an enrich question push (questionPush.ts): tap lands on Danas, where the ClarifyCard is. */
+  kind?: 'question';
 }
 
 let channelReady = false;
@@ -57,7 +59,11 @@ export const ExpoScheduler: Scheduler = {
         body: n.body,
         sound: SOUND_FILE,
         data: { triggerId: n.triggerId, noteId: n.noteId } satisfies NotificationData,
-        categoryIdentifier: n.category,
+        // The key must be ABSENT, not undefined. expo-notifications forwards a present-but-undefined
+        // categoryIdentifier to iOS, which cannot cast nil into its non-optional String field and throws
+        // "Cannot cast 'nil' for field 'categoryIdentifier'". refill.ts sets it to undefined for every note
+        // that is not a gift — so this crashed on every ordinary reminder.
+        ...(n.category ? { categoryIdentifier: n.category } : {}),
         // Same-day reminders are the ones worth interrupting a Focus for; the rest wait their turn.
         interruptionLevel: isToday(n.fireAt) ? 'timeSensitive' : 'active',
       },

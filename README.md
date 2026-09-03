@@ -32,7 +32,7 @@ npm run dev                              # or npm run deploy
 
 ```bash
 npm run typecheck
-npm test                       # 578 domain tests, no native modules
+npm test                       # 715 domain tests, no native modules
 npm run p0 -- --heuristic      # prompt harness, local baseline
 GEMINI_KEY=... npm run p0      # same against Gemini (fixtures are written by the user)
 npm run brand                  # re-render icon / splash / favicon from scripts/brand/render.mjs

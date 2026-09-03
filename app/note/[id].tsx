@@ -272,11 +272,38 @@ export default function NoteScreen() {
     askReread(hr ? "Tekst se promijenio. Mogu ponovno pročitati bilješku i posložiti podsjetnike prema novom tekstu." : "The text changed. I can read the note again and set the reminders from the new text.");
   };
 
-  /** Tapping outside the box cancels the edit — nothing half-open stays on screen (Marko, 2026-08-28). */
+  /**
+   * Tapping outside the box closes the edit — but never throws typed words away silently (Marko, 2026-09-01).
+   *
+   * An unchanged draft just closes: a stray tap outside must not produce a dialog. A CHANGED one asks, because
+   * losing a paragraph you just wrote to a mis-tap is the kind of thing you cannot undo — and the whole point
+   * of this app is that what you wrote is kept.
+   */
   const cancelBody = () => {
     if (bodyCommitted.current) return; // the blur that follows "Spremi" must not undo it
-    setEditingBody(false);
-    setBodyDraft("");
+    const next = bodyDraft.trim();
+    if (!next || next === note.rawText) {
+      setEditingBody(false);
+      setBodyDraft("");
+      return;
+    }
+    Alert.alert(
+      hr ? "Odbaciti izmjene?" : "Discard changes?",
+      hr ? "Uredio si tekst, ali nije spremljen." : "You edited the text but it is not saved.",
+      [
+        // "Nastavi uređivanje" is the safe default and comes first; discarding is the destructive one.
+        { text: hr ? "Nastavi uređivanje" : "Keep editing", style: "cancel" },
+        {
+          text: hr ? "Odbaci" : "Discard",
+          style: "destructive",
+          onPress: () => {
+            setEditingBody(false);
+            setBodyDraft("");
+          },
+        },
+        { text: hr ? "Spremi" : "Save", onPress: () => void saveBody() },
+      ],
+    );
   };
 
   /**

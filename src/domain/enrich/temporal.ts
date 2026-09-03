@@ -24,6 +24,8 @@ import { fold } from './heuristic';
 export type TemporalSignal =
   /** "10.6.", "10.6.2027", "10. lipnja" — a calendar date, optionally with a year and an hour. */
   | { type: 'absolute'; month: number; day: number; year: number | null; hour: number | null; minute: number; text: string }
+  /** "za 2 minute", "za 2 sata" — a span shorter than a day, added in ms so no default hour overwrites it. */
+  | { type: 'in_minutes'; minutes: number; text: string }
   /** "u 15h" with no day — today or tomorrow. */
   | { type: 'time_only'; hour: number; minute: number; text: string }
   /** "sutra", "za 2 tjedna", "sljedeći mjesec" — an offset from now, in calendar units. */
@@ -52,13 +54,18 @@ export type TemporalSignal =
       text: string;
     }
   /** "ujutro", "navečer" — an hour band with no day of its own. */
-  | { type: 'day_part'; part: 'morning' | 'noon' | 'afternoon' | 'evening' | 'dusk' | 'night'; text: string }
+  | { type: 'day_part'; part: 'morning' | 'noon' | 'afternoon' | 'evening' | 'dusk' | 'night' | 'midnight'; text: string }
   /** "do petka", "najkasnije 15.9.", "prije petka" — the LAST useful moment. */
   | { type: 'deadline'; signal: TemporalSignal; text: string }
   /** "2 dana prije Aninog rođendana" — resolved later, against an anchor. */
   | { type: 'offset_from_anchor'; offsetDays: number; subject: string | null; text: string }
-  /** "svakih 6 mjeseci", "svaki ponedjeljak", "svake godine". */
-  | { type: 'recurring'; rule: 'daily' | 'weekly' | 'monthly' | 'yearly'; months?: number; weekday?: number; text: string }
+  /**
+   * "svakih 6 mjeseci", "svaki ponedjeljak", "svake godine".
+   *
+   * `hour`/`minute` carry a stated time: "svaki ponedjeljak trening u 7" used to land at the 09:00 default
+   * because the rhythm and the clock were parsed separately and only the rhythm survived.
+   */
+  | { type: 'recurring'; rule: 'daily' | 'weekly' | 'monthly' | 'yearly'; months?: number; weekday?: number; hour?: number | null; minute?: number; text: string }
   /** "ljeti", "prije ljeta", "oko Božića" — deliberately imprecise. */
   | { type: 'season'; season: 'spring' | 'summer' | 'autumn' | 'winter' | 'around'; text: string }
   /** "kad budem u Zagrebu" — not a time at all; keep the phrase for semantic search. */
@@ -83,7 +90,8 @@ export const DEFAULT_HOUR: Record<string, number> = {
   contact: 9,
 };
 
-const HOUR_OF_PART: Record<string, number> = { morning: 9, noon: 12, afternoon: 15, dusk: 18, evening: 19, night: 21 };
+// midnight is 00:00 — a precise hour, unlike the other entries which are conventions for a vague phrase.
+const HOUR_OF_PART: Record<string, number> = { morning: 9, noon: 12, afternoon: 15, dusk: 18, evening: 19, night: 21, midnight: 0 };
 
 const MONTH_STEMS: Record<string, number> = {
   sijec: 1, velja: 2, ozuj: 3, travn: 4, svib: 5, lip: 6, srp: 7, kolovoz: 8, ruj: 9, listopad: 10, studen: 11, prosin: 12,
@@ -170,7 +178,12 @@ function parseClock(f: string): { hour: number; minute: number } | null {
   // ("kupiti 2 karte") are not mistaken for a time. "u 10 misecu" is a MONTH said by number without the
   // ordinal dot (dictation never writes one) — it must not become 10 o'clock, so the month words are excluded
   // like any other unit. namedMonth() picks it up instead.
-  const bare = /\b(?:u|at|@)\s*(\d{1,2})(?!\s*[:.\d])(?!\s*(?:h|sati|sat|am|pm|eur|kn|km|min|mjesec|misec|month))\b/.exec(f);
+  // "iza 7" / "poslije 5" / "nakon 8" — an hour stated as a lower bound (Marko, 2026-09-01). At 18:00 "nazovi
+  // tatu iza 7" produced no reminder at all, because these words were only ever read as a DAY shift
+  // ("nakon petka" = the day after Friday) and never as a clock. They only count directly before a number, so
+  // "iza kuće" and "poslije petka" keep their old meanings — a number is what makes it a time.
+  const lowerBound = /\b(?:iza|poslije|nakon|after)\s*(\d{1,2})(?!\s*[:.\d])(?!\s*(?:h|sati|sat|am|pm|eur|kn|km|min|mjesec|misec|month|dan|tjed|godin))\b/.exec(f);
+  const bare = /\b(?:u|at|@)\s*(\d{1,2})(?!\s*[:.\d])(?!\s*(?:h|sati|sat|am|pm|eur|kn|km|min|mjesec|misec|month))\b/.exec(f) ?? lowerBound;
 
   // Spoken half-hours, the way dictation writes them: "u pola 9" is 8:30, "u 9 i pol" / "u 9 i 30" is 9:30. The
   // hour they name is as ambiguous as a bare one ("pola 3" is 14:30 in the afternoon sense), so the minutes here
@@ -214,6 +227,14 @@ function parseClock(f: string): { hour: number; minute: number } | null {
       /* keep as written: "u 7 ujutro" is 07:00 */
     } else if (hour <= 7) {
       hour += 12; // bare 1–7 → the afternoon one. 8–11 stay morning hours.
+    } else if (lowerBound && f.includes(lowerBound[0]) && !/\b(sutra|prekosutra|preksutra|prikosutra|priksutra|tomorrow)\b/.test(f)) {
+      // "iza 8" / "poslije 9": said about the evening AHEAD far more often than about tomorrow's breakfast, so
+      // 8–11 flip here where a bare "u 8" would stay a morning hour.
+      //
+      // Only when no other day is named, though: "sutra iza 9" is 09:00 tomorrow, not 21:00. The reasoning for
+      // the flip is that a bare lower bound means "later today"; once a day is stated that reasoning is gone.
+      // An explicit day-part still wins above ("iza 7 ujutro" is 07:00).
+      hour += 12;
     }
   }
   if (hour < 0 || hour > 23) return null;
@@ -224,13 +245,16 @@ function parseClock(f: string): { hour: number; minute: number } | null {
 function parseDayPart(f: string): TemporalSignal & { type: 'day_part' } | null {
   // Order matters: the more specific phrase has to be tested before the one it contains, or "kasno navečer"
   // matches "navečer" and lands at 19:00 instead of 21:00, and "predvečer" never gets its own hour.
-  const table: Array<[RegExp, 'morning' | 'noon' | 'afternoon' | 'evening' | 'dusk' | 'night']> = [
+  const table: Array<[RegExp, 'morning' | 'noon' | 'afternoon' | 'evening' | 'dusk' | 'night' | 'midnight']> = [
     [/\b(kasno\s+navecer|kasno\s+uvecer|late\s+night)\b/, 'night'],
     [/\b(predvecer|pred\s+vecer|predveče\w*)\b/, 'dusk'],
     [/\b(ujutro|jutro|prijepodne|morning)\b/, 'morning'],
     [/\b(oko\s+podne|podne|noon)\b/, 'noon'],
     [/\b(popodne|poslijepodne|afternoon)\b/, 'afternoon'],
     [/\b(navecer|vecer\w*|tonight|evening)\b/, 'evening'],
+    // Midnight before the generic night words, or "u ponoć" matches "noc" and lands at 21:00. It is a precise
+    // hour rather than a vague part of the day — "u ponoć čestitat Ani" produced no reminder at all before.
+    [/\b(ponoc\w*|midnight)\b/, 'midnight'],
     [/\b(nocu|noc|night)\b/, 'night'],
   ];
   for (const [re, part] of table) {
@@ -238,6 +262,32 @@ function parseDayPart(f: string): TemporalSignal & { type: 'day_part' } | null {
     if (m) return { type: 'day_part', part, text: m[0] };
   }
   return null;
+}
+
+/**
+ * Does the number at `index` belong to an identifier rather than a date?
+ *
+ * "Verzija 2.10", "model 3.5", "soba 1.2", "polica 12.09" — a word that introduces an identifier makes the
+ * number an identifier, and turning those into reminders is a pure false positive.
+ *
+ * Exported because `heuristic.ts` has its own copy of the date regex (`extractExplicitDate`) and that one is
+ * the one that WINS for occasion dates. It had no guard, so "Verzija 2.10 ima bug" scheduled 2 October even
+ * though this file had refused it since August (Marko, 2026-09-01). One list, two callers — a second copy of
+ * the word list would drift the moment either side learned a new word.
+ */
+export function looksLikeIdentifier(text: string, index: number): boolean {
+  // trimEnd matters: the date regex captures its own leading separator, so `index` can point AT the space
+  // before the digits rather than at them. Anchoring on raw text then silently never matched.
+  const lead = fold(text.slice(Math.max(0, index - 24), index)).trimEnd();
+  // Two shapes, deliberately separate.
+  //
+  // 1. The keyword sits directly before the number: "verzija 2.10", "model 3.5", "soba 1.2", "kod 10.12".
+  const adjacent = /\b(verzij\w*|version|model\w*|br|broj\w*|number|no|soba|stan|kat|sifr\w*|sifra|kod|code|polic\w*|racun\w*|artikl\w*|serij\w*|tip)\s*\.?$/;
+  // 2. One noun in between: "Polica osiguranja 12.5", "Broj police 12.09". Only for words that are unambiguous
+  //    identifiers, NOT for the whole list — "kod" is overwhelmingly the preposition in Croatian ("kod
+  //    zubara"), so allowing a gap after it swallowed the real date in "pregled kod oftalmologa 15.9.".
+  const withGap = /\b(verzij\w*|version|model\w*|broj\w*|number|sifr\w*|polic\w*|racun\w*|artikl\w*|serij\w*)\s*\.?\s+[a-z]+$/;
+  return adjacent.test(lead) || withGap.test(lead);
 }
 
 /** "10.6.", "10.6.2027", "10/6", "10. lipnja", "lipnja 10" — but never an hour like "u 10.30". */
@@ -249,8 +299,7 @@ function parseAbsolute(text: string, f: string): { month: number; day: number; y
     if (/\b(u|at|od|do)\s$/.test(before + ' ') && !m[3]) continue; // "u 10.30" is a clock
     // A word that introduces an identifier makes the number an identifier, not a date: "verzija 2.10",
     // "model 3.5", "soba 1.2", "broj police 12.09". Turning those into reminders is a pure false positive.
-    const lead = fold(text.slice(Math.max(0, m.index - 24), m.index));
-    if (/\b(verzij\w*|version|model\w*|br|broj\w*|number|no|soba|stan|kat|sifr\w*|sifra|kod|code|polic\w*|racun\w*|artikl\w*|serij\w*|tip)\s*\.?\s*$/.test(lead)) continue;
+    if (looksLikeIdentifier(text, m.index)) continue;
     const day = Number(m[1]);
     const month = Number(m[2]);
     if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
@@ -369,31 +418,36 @@ function parseNthWeekday(f: string, hour: number | null, minute: number): (Tempo
 }
 
 /** Recurring: "svakih 6 mjeseci", "svaki ponedjeljak", "jednom godišnje". */
-function parseRecurring(f: string): (TemporalSignal & { type: 'recurring' }) | null {
-  if (/\b(jednom\s+godisnje|svake\s+godine|svaki\s+rodendan|godisnje|yearly|annually|every\s+year)\b/.test(f)) {
-    const m = /\b(jednom\s+godisnje|svake\s+godine|svaki\s+rodendan|godisnje|yearly|annually|every\s+year)\b/.exec(f)!;
-    return { type: 'recurring', rule: 'yearly', text: m[0] };
+function parseRecurring(f: string, hour: number | null = null, minute = 0): (TemporalSignal & { type: 'recurring' }) | null {
+  const at = { hour, minute }; // spread into every branch so a stated time survives the rhythm
+  // "svakih godinu dana" / "svake godine" / "svaku godinu" — a yearly rhythm said with the noun rather than the
+  // adverb. "Cijepiti psa svakih godinu dana" produced NOTHING before, which for a vaccination is the worst
+  // kind of miss.
+  if (/\b(jednom\s+godisnje|svak\w*\s+godin\w*(?:\s+dana)?|svaki\s+rodendan|godisnje|yearly|annually|every\s+year)\b/.test(f)) {
+    const m = /\b(jednom\s+godisnje|svak\w*\s+godin\w*(?:\s+dana)?|svaki\s+rodendan|godisnje|yearly|annually|every\s+year)\b/.exec(f)!;
+    return { type: 'recurring', rule: 'yearly', ...at, text: m[0] };
   }
-  const nMonths = /\b(?:svak\w*|every)\s+(\d{1,2})\s*(mjesec\w*|months?)\b/.exec(f);
-  if (nMonths) return { type: 'recurring', rule: 'monthly', months: Number(nMonths[1]), text: nMonths[0] };
-  const nMonthsIh = /\b(?:svakih|svaka)\s+(\d{1,2})\s*(mjesec\w*|months?)\b/.exec(f);
-  if (nMonthsIh) return { type: 'recurring', rule: 'monthly', months: Number(nMonthsIh[1]), text: nMonthsIh[0] };
+  // One pattern for every "svak-" form, and MISEC included: dictation writes the ikavica ("svaka 3 miseca"),
+  // which fell through both of the old month patterns and got the invented "~6 mjeseci" fallback instead of the
+  // rhythm the user actually stated.
+  const nMonths = /\b(?:svak\w*|every)\s+(\d{1,2})\s*(mjesec\w*|misec\w*|mises\w*|months?)\b/.exec(f);
+  if (nMonths) return { type: 'recurring', rule: 'monthly', months: Number(nMonths[1]), ...at, text: nMonths[0] };
   if (/\b(svaki\s+mjesec|mjesecno|monthly|every\s+month)\b/.test(f)) {
     const m = /\b(svaki\s+mjesec|mjesecno|monthly|every\s+month)\b/.exec(f)!;
-    return { type: 'recurring', rule: 'monthly', months: 1, text: m[0] };
+    return { type: 'recurring', rule: 'monthly', months: 1, ...at, text: m[0] };
   }
   // "svaki ponedjeljak"
   const every = /\b(?:svak\w*|every)\s+([a-zčćžšđ]{4,})\b/.exec(f);
   if (every) {
     for (let i = 0; i < 7; i++) {
       if (WEEKDAY_STEMS[i]!.some((s) => every[1]!.startsWith(s))) {
-        return { type: 'recurring', rule: 'weekly', weekday: i, text: every[0] };
+        return { type: 'recurring', rule: 'weekly', weekday: i, ...at, text: every[0] };
       }
     }
   }
   if (/\b(svaki\s+dan|svako\s+jutro|dnevno|daily|every\s+day)\b/.test(f)) {
     const m = /\b(svaki\s+dan|svako\s+jutro|dnevno|daily|every\s+day)\b/.exec(f)!;
-    return { type: 'recurring', rule: 'daily', text: m[0] };
+    return { type: 'recurring', rule: 'daily', ...at, text: m[0] };
   }
   return null;
 }
@@ -440,11 +494,48 @@ export function numberWords(folded: string): string {
 }
 
 /**
+ * Consonant-only shorthand, the way a phone keyboard gets used (Marko, 2026-09-01): "vcrs" is večeras.
+ *
+ * Whole word only — rewriting mid-token would corrupt real words. These expand to the spellings the rules
+ * below already know, so no rule needs to learn the abbreviation itself.
+ */
+const SHORTHAND: Record<string, string> = {
+  vcrs: 'veceras',
+  vecer: 'veceras',
+  jtr: 'sutra',
+  sutr: 'sutra',
+  pon: 'ponedjeljak',
+  uto: 'utorak',
+  sri: 'srijeda',
+  cet: 'cetvrtak',
+  pet_: 'petak', // never bare "pet" — that is the number five (see NUMBER_WORDS)
+  sub: 'subota',
+  ned: 'nedjelja',
+};
+const SHORTHAND_RE = new RegExp(`\\b(${Object.keys(SHORTHAND).filter((k) => !k.endsWith('_')).join('|')})\\b`, 'g');
+
+/**
+ * Normalize how people actually type time, so every rule downstream keeps reading plain digits.
+ *
+ * Two fixes, both from the dev build:
+ *  - **Shorthand**: "vcrs" → "veceras".
+ *  - **A number glued to its preposition**: "u8" → "u 8", "u19h" → "u 19h". Dictation and fast typing drop the
+ *    space, and every clock rule requires one, so "vcrs u8" produced no hour at all. Only the standalone
+ *    prepositions are split — a letter that merely happens to precede digits ("verzija 2.10", "covid19") is
+ *    left alone, which matters because `extractExplicitDate` reads those numbers as dates.
+ */
+export function spokenShorthand(folded: string): string {
+  return folded
+    .replace(SHORTHAND_RE, (_m, w: string) => SHORTHAND[w] ?? w)
+    .replace(/(^|[^a-z0-9])(u|at|oko|do)(\d{1,2})\b/g, (_m, pre: string, prep: string, n: string) => `${pre}${prep} ${n}`);
+}
+
+/**
  * All temporal signals in the text, most useful first.
  * Never throws; an empty array means "no time signal at all".
  */
 export function parseTemporal(text: string, now: number): TemporalSignal[] {
-  const f = numberWords(fold(text));
+  const f = spokenShorthand(numberWords(fold(text)));
   const out: TemporalSignal[] = [];
 
   const clock = parseClock(f);
@@ -478,6 +569,40 @@ export function parseTemporal(text: string, now: number): TemporalSignal[] {
       if (/^(tjed|week)/.test(unit)) return { ...s, weeks: n };
       if (/^(mjes|mises|misec|month)/.test(unit)) return { ...s, months: n };
       return { ...s, days: n };
+    }
+
+    // "u roku 8 dana" / "u roku od 15 dana" / "unutar 3 dana" — a deadline stated as a SPAN. Produced nothing
+    // at all before, so "Platit kaznu u roku 8 dana" was a note with a correct title and no reminder. Read
+    // before the generic "za N" rule because the phrase contains no "za".
+    const within = /\b(?:u\s+roku(?:\s+od)?|unutar|within|u\s+sljedec\w*)\s+(\d{1,3})\s*(dan\w*|tjed\w*|mjesec\w*|misec\w*|godin\w*|days?|weeks?|months?|years?)\b/.exec(f);
+    // The same deadline said with "rok" as a NOUN: "Rok od 10 dana za platit kaznu", "Rok za prijavu je 15
+    // dana", "Imam rok 8 dana". The gap between "rok" and the number tolerates a few ordinary words ("za
+    // prijavu je") but stops at punctuation and at digits — in "Produzili su rok, platit cu za 3 dana" the
+    // 3 days are when he pays, not how long the rok is. `\w{0,2}` takes the case endings (roka, roku, rokom)
+    // without reaching "rokovnik".
+    const nounRok = within ? null : /\brok\w{0,2}\b[^.,;:!?0-9]{0,24}?(\d{1,3})\s*(dan\w*|tjed\w*|mjesec\w*|misec\w*|godin\w*|days?|weeks?|months?|years?)\b/.exec(f);
+    const span = within ?? nounRok;
+    if (span) {
+      const v = Number(span[1]);
+      const unit = span[2]!;
+      const s: TemporalSignal = { type: 'relative', hour, minute, approximate: false, text: span[0] };
+      if (/^(tjed|week)/.test(unit)) return { ...s, weeks: v };
+      if (/^(mjes|mises|misec|month)/.test(unit)) return { ...s, months: v };
+      if (/^(godin|year)/.test(unit)) return { ...s, years: v };
+      return { ...s, days: v };
+    }
+
+    // "za 2 minute" / "za 45 minuta" / "za 2 sata" — the shortest reminders there are, and they produced
+    // nothing at all ("sastanak za 2 minute" → no reminder).
+    //
+    // Its own signal type rather than a fraction of `relative.days`: that path calls setDate() (which
+    // truncates) and then overwrites the hour with the intent default, so anything under a day was rounded
+    // away to 09:00. `in_minutes` is resolved by adding milliseconds and touching neither.
+    const soon = /\b(?:za|in)\s+(\d{1,3})\s*(minut\w*|min|mins?|minutes?|sat|sata|sati|h|hours?)\b/.exec(f);
+    if (soon) {
+      const v = Number(soon[1]);
+      const isHour = /^(sat|h|hour)/.test(soon[2]!);
+      return { type: 'in_minutes', minutes: v * (isHour ? 60 : 1), text: soon[0] };
     }
 
     const n = /\b(?:za|in)\s+(\d{1,3})\s*(dan|dana|tjedan|tjedna|tjedana|mjesec|mjeseca|mjeseci|misec|miseca|miseci|godin\w*|days?|weeks?|months?|years?)\b/.exec(f);
@@ -570,7 +695,9 @@ export function parseTemporal(text: string, now: number): TemporalSignal[] {
 
   // Build the candidate list in priority order.
   const abs = parseAbsolute(text, f);
-  const recurring = parseRecurring(f);
+  // The stated clock is passed in: a rhythm and an hour are parsed separately, and only the rhythm used to
+  // survive ("svaki ponedjeljak trening u 7" landed at the 09:00 default).
+  const recurring = parseRecurring(f, hour, minute);
   const offset = parseOffset(f);
   const relative = rel();
   const partSig = part();
@@ -697,6 +824,11 @@ export function resolveSignal(signal: TemporalSignal, now: number, intent: Inten
       if (t <= now) t = dayAt(now, 1, signal.hour, signal.minute);
       return { fireAt: t, certainty: 'high' };
     }
+
+    // Plain millisecond arithmetic: no setDate (which truncates a fractional day) and no default hour, which
+    // is exactly why this is not folded into 'relative'. Certainty is high — the user named an exact span.
+    case 'in_minutes':
+      return { fireAt: now + signal.minutes * 60_000, certainty: 'high' };
 
     case 'relative': {
       const d = new Date(now);
@@ -843,8 +975,10 @@ export function resolveSignal(signal: TemporalSignal, now: number, intent: Inten
         if (diff === 0) diff = 7;
         d.setDate(d.getDate() + diff);
       } else d.setDate(d.getDate() + 1);
-      d.setHours(h, 0, 0, 0);
-      return { fireAt: d.getTime(), certainty: 'medium', recurring: signal.rule };
+      // A stated hour wins over the intent default: "svaki ponedjeljak trening u 7" is 19:00, not 09:00.
+      d.setHours(signal.hour ?? h, signal.hour != null ? (signal.minute ?? 0) : 0, 0, 0);
+      // Certainty is high when the user named the time themselves; the DAY still comes from the rhythm.
+      return { fireAt: d.getTime(), certainty: signal.hour != null ? 'high' : 'medium', recurring: signal.rule };
     }
 
     // Deliberately dateless — the caller turns these into an anchor offset or into keywords.

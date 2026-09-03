@@ -17,6 +17,7 @@ import { applyMutations } from '@/db/applyMutations';
 import { prefsRepo } from '@/db/repositories/prefs';
 import type { Anchor, AnchorKind, AnchorPayload } from '@/domain/types';
 import { refillScheduledWindow } from './scheduling/refill';
+import { dismissQuestionPush } from './notifications/questionPush';
 import { uiLang } from '@/ui/theme/locale';
 
 export interface AnswerAnchorInput {
@@ -40,6 +41,10 @@ export function anchorLabel(person: string, kind: AnchorKind, lang: 'hr' | 'en' 
 }
 
 export async function answerAnchor(input: AnswerAnchorInput): Promise<Anchor> {
+  // A tap in the app answers the question the push announced — clear the tray entry (questionPush.ts). Not for
+  // 'inferred': that call arrives from applyEnrichResult in the same breath as the push itself, and the note
+  // may still hold a SECOND question the push is legitimately about.
+  if (input.source !== 'inferred') void dismissQuestionPush(input.noteId);
   const d = db();
   const now = clock.now();
   const note = await notesRepo.byId(d, input.noteId);
@@ -141,6 +146,7 @@ async function bindPendingTriggers(anchor: Anchor) {
 
 /** Skip the question — keep the note ("Bez podsjetnika" / "Preskoči pitanje"). Pending anchor triggers are dropped. */
 export async function dismissQuestions(noteId: string) {
+  void dismissQuestionPush(noteId); // answered by skipping — the tray entry must not keep asking
   const d = db();
   const now = clock.now();
   const pending = await triggersRepo.pendingAnchor(d, noteId);
@@ -154,6 +160,7 @@ export async function dismissQuestions(noteId: string) {
 
 /** Options-question answered: store as a learned pref if it maps to one; then clear it. */
 export async function answerOption(noteId: string, questionId: string, option: string) {
+  void dismissQuestionPush(noteId);
   const d = db();
   const now = clock.now();
   const note = await notesRepo.byId(d, noteId);
@@ -210,6 +217,7 @@ export async function answerFallbackDate(noteId: string, questionId: string, whe
 }
 
 async function moveFallback(noteId: string, questionId: string, at: Date, keepHour: boolean) {
+  void dismissQuestionPush(noteId); // both interval answers land here — the tray entry is answered either way
   const d = db();
   const now = clock.now();
   const note = await notesRepo.byId(d, noteId);

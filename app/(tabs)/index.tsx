@@ -122,12 +122,6 @@ export default function TodayScreen() {
           </View>
         ) : null}
 
-        {showExplainer ? (
-          <View style={styles.block}>
-            <ExplainerSheet onClose={() => setShowExplainer(false)} />
-          </View>
-        ) : null}
-
         {readingIds.map((id) => {
           const n = data?.reading.find((x) => x.id === id);
           const first = seenExplainer === false && id === readingIds[0];
@@ -354,6 +348,8 @@ export default function TodayScreen() {
           </Pressable>
         ) : null}
       </Screen>
+      {/* Outside <Screen>: a bottom sheet must overlay the scroll view, not scroll with it. */}
+      <ExplainerSheet visible={showExplainer} onClose={() => setShowExplainer(false)} />
     </>
   );
 }

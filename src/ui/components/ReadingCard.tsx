@@ -26,6 +26,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { R, S } from '../theme/tokens';
 import { Body, Label, Mono } from './Txt';
 import { Glass } from './Glass';
+import { Sheet } from './Sheet';
 import { Button } from './Button';
 import { uiLang } from '../theme/locale';
 import { readingState, MIN_VISIBLE_MS, STEP_AT_MS } from './readingHold';
@@ -150,46 +151,63 @@ export function ReadingCard({ showExplainer, onDismissExplainer, onDoItMyself, c
   );
 }
 
-/** The same explanation, on demand — what the 💡 button opens once the card is no longer shown by default. */
-export function ExplainerSheet({ onClose }: { onClose: () => void }) {
+/**
+ * The same explanation, on demand — what the 💡 button opens once the card is no longer shown by default.
+ *
+ * A real bottom sheet (Marko, 2026-09-01), not a card pushed into the Today list: it rises from the bottom over
+ * a scrim, has a grabber and drags away, and reuses the shared `Sheet` so its timing matches DatePickerSheet
+ * and the filter sheet. As an inline block it shifted the whole list when it opened, and a second copy of a
+ * modal animation is how two sheets end up moving at different speeds (see Sheet's own note).
+ */
+export function ExplainerSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const t = useTheme();
   const c = COPY[uiLang()];
   const hr = uiLang() === 'hr';
 
+  // Icons that say what each step DOES, in step order — the first sheet cut was bare text and read as a
+  // debug dump (Marko, 2026-09-01). Same visual language as the live ReadingCard: badge + ion accents.
+  const stepIcons = ['reader-outline', 'search-outline', 'notifications-outline'] as const;
+
   return (
-    <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(160)}>
-      <Glass radius={R.xxl} borderColor={t.c.accent}>
-        <View style={styles.card}>
-          <View style={styles.head}>
-            <View style={[styles.badge, { backgroundColor: t.c.accentSoft }]}>
-              <Ionicons name="bulb" size={14} color={t.c.ion} />
-            </View>
-            <Label tone="ion" style={{ flex: 1 }}>
-              {hr ? 'Kako ovo radi' : 'How this works'}
-            </Label>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel={hr ? 'Zatvori' : 'Close'}>
-              <Ionicons name="close" size={18} color={t.c.muted} />
-            </Pressable>
+    // No `title` — the Sheet's plain one-line head is exactly what looked thrown together. The bulb badge
+    // header below matches the card this sheet replaced, so the 💡 button opens what it promises.
+    <Sheet visible={visible} onClose={onClose} closeLabel={hr ? 'Zatvori' : 'Close'}>
+      <View style={styles.sheetBody}>
+        <View style={styles.head}>
+          <View style={[styles.badge, { backgroundColor: t.c.accentSoft }]}>
+            <Ionicons name="bulb" size={14} color={t.c.ion} />
           </View>
-          {c.steps.map((s, i) => (
-            <View key={s} style={styles.stepRow}>
-              <Mono tone="accent" size="xs" style={{ width: 16 }}>
-                {i + 1}
-              </Mono>
-              <Body size="sm" style={{ flex: 1 }}>
-                {s}
-              </Body>
-            </View>
-          ))}
-          <Mono tone="muted" size="xs" style={{ marginTop: S.md }}>
-            {c.next}
-          </Mono>
-          <Mono tone="muted" size="xs" style={{ marginTop: 2 }}>
-            {c.nextQuestion}
-          </Mono>
+          <Label tone="ion">{hr ? 'Kako ovo radi' : 'How this works'}</Label>
         </View>
-      </Glass>
-    </Animated.View>
+
+        {c.steps.map((s, i) => (
+          <View key={s} style={styles.sheetStepRow}>
+            <View style={[styles.stepIcon, { backgroundColor: t.c.accentSoft }]}>
+              <Ionicons name={stepIcons[i] ?? 'ellipse-outline'} size={15} color={t.c.ion} />
+            </View>
+            <Body style={{ flex: 1 }}>{s}</Body>
+            <Mono tone="muted" size="xs">
+              {i + 1}
+            </Mono>
+          </View>
+        ))}
+
+        <View style={[styles.sheetDivider, { backgroundColor: t.c.hairline }]} />
+
+        <View style={styles.sheetNoteRow}>
+          <Ionicons name="sparkles-outline" size={14} color={t.c.muted} style={styles.noteIcon} />
+          <Body size="sm" tone="fg2" style={{ flex: 1 }}>
+            {c.next}
+          </Body>
+        </View>
+        <View style={styles.sheetNoteRow}>
+          <Ionicons name="chatbubble-ellipses-outline" size={14} color={t.c.muted} style={styles.noteIcon} />
+          <Body size="sm" tone="fg2" style={{ flex: 1 }}>
+            {c.nextQuestion}
+          </Body>
+        </View>
+      </View>
+    </Sheet>
   );
 }
 
@@ -221,6 +239,13 @@ const styles = StyleSheet.create({
   rail: { flexDirection: 'row', gap: 4, marginBottom: S.md },
   railSeg: { flex: 1, height: 3, borderRadius: 2, overflow: 'hidden' },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: S.sm, paddingVertical: 3 },
+  // The Sheet supplies the frame and grabber; the body carries its own header (bulb badge) and spacing.
+  sheetBody: { paddingHorizontal: S.xl, paddingTop: S.sm, paddingBottom: S.lg },
+  sheetStepRow: { flexDirection: 'row', alignItems: 'center', gap: S.md, paddingVertical: S.sm },
+  stepIcon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  sheetDivider: { height: StyleSheet.hairlineWidth, marginVertical: S.md },
+  sheetNoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: S.sm, paddingVertical: 3 },
+  noteIcon: { marginTop: 2 },
   bulb: { width: 34, height: 34, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
 });
 

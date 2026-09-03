@@ -28,15 +28,41 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_WHISPER = "whisper-large-v3-turbo"
 # gpt-oss reasoning depth. "low" was right when the system prompt was ~4 KB of date rules; now that time parsing
 # lives in temporal.ts the model only does judgement (intent boundaries), which is what thinking actually helps.
-GROQ_REASONING = "medium"
-# Model order = best first, with quota deciding what can actually BE first. Measured on this key (2026-08-25):
-#   3.5-flash        7 RPM /  20 RPD  ← the better model, but 20 requests A DAY makes it a fallback, not a primary
-#   3.5-flash-lite  15 RPM / 500 RPD  ← the workhorse
-#   3.1-flash-lite  15 RPM / 500 RPD  ← same quota, older generation: another 500 once the 3.5 pool is gone
-# So: lite carries the day, flash catches the overflow with the better reasoning, Groq 120b catches the rest.
-# Quality of the FINAL result is enforced by reconcile() and temporal.ts regardless of which model answered.
-ENRICH_MODEL = "gemini-3.5-flash-lite"
-FALLBACK_MODEL = "gemini-3.5-flash"
+# "high" since 2026-09-01: Groq is the LAST rung of the ladder, reached only after six Gemini models have run
+# out, so it is rare — and when it does run it is the only thing standing between the note and the offline
+# heuristic. Groq's cap is 200k TOKENS/day, which is the resource reasoning spends, but at that position the
+# request count is low enough that depth is the better trade.
+GROQ_REASONING = "high"
+# ── The Gemini ladder: BEST FIRST, walked top to bottom until one answers, then Groq (Marko, 2026-09-01).
+#
+# Quotas read off the AI Studio dashboard for this key (2026-09-01), free tier, RPM / TPM / RPD:
+#   gemini-3.7-flash        5 / 250K /  20   ← newest and best
+#   gemini-3.6-flash        5 / 250K /  20
+#   gemini-3.5-flash        5 / 250K /  20
+#   gemini-3-flash-preview  5 / 250K /  20   ← the API id has the -preview suffix; the dashboard's display
+#                                              name ("Gemini 3 Flash") does NOT match it. A bare
+#                                              "gemini-3-flash" returns 404, and a 404 is non-retryable, so
+#                                              one wrong id in the ladder failed every request in the harness
+#                                              even with three good models above it. Verify ids against
+#                                              GET /models, never against the dashboard label.
+#   gemini-3.5-flash-lite  15 / 250K / 500   ← the volume tier
+#   gemini-3.1-flash-lite  15 / 250K / 500   ← another 500 of the same
+#
+# That is ~80 requests a day of top-tier Flash before the Lites take over with 1000 more. Each rung is its own
+# quota pool, so the ladder is extra daily capacity, not just redundancy — which is what makes best-first
+# affordable here. Previously 3.5-flash-lite led because a single 20 RPD model cannot carry a day alone; with
+# four of them stacked it can.
+#
+# Thinking is ON for the Flash rungs (prompt.ts, thinkingBudget: -1) — the binding limit is REQUESTS, not
+# tokens, so reasoning inside a request already paid for is free. The worker strips thinkingConfig for `-lite`
+# models, which reject it with a 400.
+#
+# Quality of the FINAL result is enforced by reconcile() and temporal.ts regardless of which model answered
+# (hard rules 11 and 13) — the ladder changes capacity and judgement, never the dates.
+GEMINI_MODELS = "gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite"
+# Legacy single-model settings. Only used when GEMINI_MODELS is empty; kept so an older deploy still works.
+ENRICH_MODEL = "gemini-3.7-flash"
+FALLBACK_MODEL = "gemini-3.5-flash-lite"
 EMBED_MODEL = "gemini-embedding-001"
 # Voice. Whisper only, for now. gemini-3.5-transcribe rejects our request shape with 400 (it is a Live-API
 # style model, not a plain generateContent one), so every voice note paid for one dead Gemini call before

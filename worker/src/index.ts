@@ -20,8 +20,13 @@ export interface Env {
   RL?: KVNamespace;
   DAILY_LIMIT?: string;
   ENRICH_PROVIDER?: 'groq' | 'gemini';
-  ENRICH_MODEL?: string; // gemini
-  FALLBACK_MODEL?: string; // gemini lite, used once when ENRICH_MODEL returns 429
+  ENRICH_MODEL?: string; // gemini — legacy single primary, used when GEMINI_MODELS is unset
+  FALLBACK_MODEL?: string; // gemini lite — legacy single fallback, used when GEMINI_MODELS is unset
+  /**
+   * Comma-separated Gemini ladder, best first: each is tried in turn until one answers, then Groq.
+   * Preferred over ENRICH_MODEL/FALLBACK_MODEL, which remain for backwards compatibility.
+   */
+  GEMINI_MODELS?: string;
   EMBED_MODEL?: string;
   GROQ_MODEL?: string;
   GROQ_WHISPER?: string;
@@ -44,6 +49,17 @@ function cfg(env: Env) {
     groqKey: env.GROQ_API_KEY || null,
     geminiChat: env.ENRICH_MODEL || 'gemini-3.5-flash',
     geminiLite: env.FALLBACK_MODEL || 'gemini-3.5-flash-lite',
+    /**
+     * The Gemini ladder, best first — tried in order until one answers (2026-09-01).
+     *
+     * Replaces the old two-model special case, which fell back only on 429 and only once. GEMINI_MODELS is a
+     * comma-separated list; ENRICH_MODEL/FALLBACK_MODEL stay as the fallback so an old deploy keeps working.
+     * Each rung is a separate free-tier quota pool, so a ladder buys real capacity, not just redundancy.
+     */
+    geminiModels: (env.GEMINI_MODELS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     geminiEmbed: env.EMBED_MODEL || 'gemini-embedding-001',
     // Empty string means "off" — `||` would silently resurrect the default, so the check is explicit.
     geminiTranscribe: env.GEMINI_TRANSCRIBE === undefined ? '' : env.GEMINI_TRANSCRIBE,
@@ -211,6 +227,18 @@ function retryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+/**
+ * The Gemini models to try, best first, deduplicated.
+ *
+ * GEMINI_MODELS is the ladder. When it is unset we fall back to the old pair so an existing deploy behaves as
+ * before. Dedup matters because ENRICH_MODEL often repeats the ladder's first rung — calling the same model
+ * twice in a row on a 429 is a wasted round trip against the very quota that just refused us.
+ */
+function geminiLadder(c: { geminiModels: string[]; geminiChat: string; geminiLite: string }): string[] {
+  const list = c.geminiModels.length ? c.geminiModels : [c.geminiChat, c.geminiLite];
+  return [...new Set(list.filter(Boolean))];
+}
+
 // ───────────────────────────────────────────── Router
 
 export default {
@@ -317,18 +345,34 @@ export default {
         continue;
       }
 
-      const model = forcedModel ?? c.geminiChat;
-      let r = await callGemini(model, 'generateContent', body, c.geminiKey);
-      if (r.status === 429 && c.geminiLite !== model) {
-        const second = await callGemini(c.geminiLite, 'generateContent', body, c.geminiKey);
-        if (second.status !== 429) {
-          return new Response(second.body, { status: second.status, headers: { 'content-type': 'application/json', 'x-provider': 'gemini', 'x-model-used': c.geminiLite } });
+      // ── the Gemini ladder: try each model in order, best first, until one answers.
+      //
+      // Was a two-model special case that fell back only on 429 and only once. Every rung has its own free-tier
+      // quota pool, so walking the ladder buys real daily capacity — and a 5xx or a timeout now falls through
+      // instead of failing the request.
+      //
+      // A **404 skips only that rung**: it means the model id is wrong (the dashboard's display name is not
+      // the API id — "Gemini 3 Flash" is `gemini-3-flash-preview`), which is a config mistake in one entry, not
+      // a reason to abandon five working models. Found the hard way: one bad id in the middle of the ladder
+      // failed all 59 harness notes because 404 counted as "stop the chain".
+      //
+      // Any other non-retryable status (400 — a rejected body, a bad schema) DOES stop: that is the request
+      // itself being wrong, and re-sending it to five more models just burns five calls to get the same 400.
+      const ladder = forcedModel ? [forcedModel] : geminiLadder(c);
+      let stop = false;
+      for (const model of ladder) {
+        const r = await callGemini(model, 'generateContent', body, c.geminiKey);
+        if (r.ok) {
+          return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json', 'x-provider': 'gemini', 'x-model-used': model } });
         }
-        r = second;
+        last = r;
+        if (r.status === 404) continue; // wrong model id — skip this rung, keep the ladder
+        if (!retryable(r.status)) {
+          stop = true;
+          break;
+        }
       }
-      if (r.ok) return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json', 'x-provider': 'gemini', 'x-model-used': model } });
-      last = r;
-      if (!retryable(r.status)) break;
+      if (stop) break;
     }
 
     // Pass the last upstream message through: a 429 alone doesn't say whether it's "too fast" or "no free tier".

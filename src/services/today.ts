@@ -166,22 +166,24 @@ export async function react(surfacingId: string, reaction: Reaction) {
   const cur = await prefsRepo.getNumber(d, PREF.thresholdSemantic, THRESHOLD.initial);
   await prefsRepo.set(d, PREF.thresholdSemantic, String(adjustThreshold(cur, reaction)), now, true);
 
-  if (reaction === 'done' && s.triggerId) {
-    // "Riješeno" on the card resolves THIS reminder only — the same tick as in the note's own list. It used to
-    // close the whole chain and archive the note, which surprised Marko ("sat prije" done ≠ birthday done). The
-    // note still follows on its own when this was the last reminder open (setReminderDone → afterTriggerDone).
+  // ── ANSWERING A CARD RESOLVES ITS REMINDER (Marko, 2026-09-01).
+  //
+  // A reminder that has already rung does not also need a manual tick: the tap you just made IS the answer.
+  // Every one of the card's answers therefore closes that reminder —
+  //   "✓ Riješeno" / "Korisno"  → dealt with,
+  //   "Ne treba mi"             → also dealt with; it says the reminder was WRONG to come back, not "later".
+  // Only the reaction stored on the surfacing differs, and that is what teaches the scorer (adjustThreshold
+  // above), so nothing is lost by resolving all of them.
+  //
+  // Before this, only 'done' resolved anything. "Ne treba mi" sends 'wrong', which had no branch at all — so
+  // the reminder stayed exactly as it was and the card's answer changed nothing. And 'not_now' used to re-arm
+  // the reminder 7 days out, which is the opposite of what "ne treba mi" means; that reaction is no longer
+  // sent by the UI (ReactionBar has two answers) and re-arming is gone with it.
+  //
+  // This resolves THIS reminder only — the same tick as in the note's own list, never the whole chain ("sat
+  // prije" done ≠ birthday done). The note follows on its own when this was the last one (afterTriggerDone).
+  if (s.triggerId) {
     await setReminderDone(s.noteId, s.triggerId);
-  }
-  if (reaction === 'not_now' && s.triggerId) {
-    const t = await triggersRepo.byId(d, s.triggerId);
-    if (t && t.state !== 'active') {
-      // re-arm in 7 days as a one-shot time trigger
-      await applyMutations(
-        s.noteId,
-        [{ op: 'add_trigger', trigger: { type: 'time', payload: { iso: new Date(now + 7 * DAY_MS).toISOString() }, label: t.label, certainty: t.certainty, fireAt: now + 7 * DAY_MS } }],
-        'manual',
-      );
-    }
   }
   notifyChange('surfacings', 'notes');
 }

@@ -157,6 +157,26 @@ export function reconcile(raw: EnrichResult, rawText: string, ctx: ReconcileCont
       iso_datetime: toLocalIsoTemporal(resolved.fireAt),
       ...(resolved.recurring ? { recurring: resolved.recurring } : {}),
     } as EnrichTrigger);
+
+    // ── E25: a DEADLINE 3+ days out gets a "dan prije" companion (Marko, 2026-09-01). One reminder on the
+    //    last day at 09:00 is often too late to act on — banks and offices keep their own hours. A mirror of
+    //    E23's same-day pair, but only for dates with a penalty behind them: the deadline wrapper ("do petka",
+    //    "najkasnije 15.9.") or a span said with rok/unutar/within. A plain "za 8 dana kontrola" stays single —
+    //    more reminders for every dated note would be noise, not safety (hard rule 6).
+    const spanWord = primary!.type === 'relative' && /\b(rok\w{0,2}|unutar|within)\b/.test(fold(primary!.text));
+    if ((primary!.type === 'deadline' || spanWord) && !resolved.recurring) {
+      const daysAhead = Math.round((startOfDay(resolved.fireAt) - startOfDay(ctx.now)) / 86_400_000);
+      if (daysAhead >= 3) {
+        const dayBefore = new Date(resolved.fireAt);
+        dayBefore.setDate(dayBefore.getDate() - 1); // calendar day, not −24 h — a DST switch must not move the hour
+        triggers.push({
+          type: 'time',
+          certainty: resolved.certainty,
+          label: labelLang === 'hr' ? 'dan prije' : 'day before',
+          iso_datetime: toLocalIsoTemporal(dayBefore.getTime()),
+        });
+      }
+    }
   } else if (hTime && !primary) {
     // Nothing parsed but the older heuristic saw something — keep it rather than lose a real time.
     triggers.push(hTime);
@@ -176,6 +196,22 @@ export function reconcile(raw: EnrichResult, rawText: string, ctx: ReconcileCont
   //    which is exactly the "random za 6 mjeseci" Marko saw instead of a question.
   const hasAnchor = triggers.some((t) => t.type === 'anchor');
   let needs_anchor = raw.needs_anchor ?? null;
+
+  // ── E24: an occasion NOBODY MENTIONED is never asked about (Marko, 2026-09-01).
+  //
+  // "Piće s Ivanom" was asked "Kad je rođendan?". There is no birthday in that text — the model saw a person's
+  // name and reached for the occasion a name usually implies, and we took `needs_anchor` on trust. Answering it
+  // would have pinned a birthday onto a note about going for a drink.
+  //
+  // An anchor question is legitimate only when something in the TEXT implies the occasion:
+  //   - the occasion word itself ("rođendan", "godišnjica"), or a memorial/marriage phrase, or
+  //   - a gift marker — "Ivan želi bušilicu" implies a birthday without naming one (E1), which is the whole
+  //     point of that rule.
+  // Our own heuristic already refuses to invent one (its `occasion` gate below needs the same signals), so this
+  // only ever strips a model guess. Hard rules 5 and 11.
+  const occasionImplied = occasionWord || memorial || marriage || giftMarker || intent === 'gift';
+  if (needs_anchor && !occasionImplied) needs_anchor = null;
+
   if (marriage && needs_anchor) needs_anchor = { ...needs_anchor, person: MARRIAGE_PERSON, kind: 'anniversary' };
 
   if (known) {

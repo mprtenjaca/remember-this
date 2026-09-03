@@ -13,8 +13,11 @@ import { inExpoGo } from './index';
 import type { NotificationData } from './expo';
 
 /**
- * How a notification behaves while the app is in the foreground. It still shows — a reminder that arrives while
- * you happen to be in the app is not less true — but without a second sound on top of the app's own.
+ * How a notification behaves while the app is in the foreground: it shows AND it dings (Marko, 2026-09-01).
+ *
+ * A reminder that arrives while you happen to be in the app is not less true, and a silent banner reads as a
+ * bug — you cannot tell a working notification from a broken one. The known cost is that this ding can land on
+ * top of the app's own completion ding (services/sound); the arriving reminder is the more important of the two.
  */
 export function configureNotificationHandler() {
   if (inExpoGo) return;
@@ -22,16 +25,22 @@ export function configureNotificationHandler() {
     handleNotification: async () => ({
       shouldShowBanner: true,
       shouldShowList: true,
-      shouldPlaySound: false,
+      shouldPlaySound: true,
       shouldSetBadge: false,
     }),
   });
 }
 
-/** Open the note a notification is about. Safe to call before navigation is ready — expo-router queues it. */
+/** Open what a notification is about. Safe to call before navigation is ready — expo-router queues it. */
 function openFromNotification(response: Notifications.NotificationResponse) {
   const data = response.notification.request.content.data as Partial<NotificationData> | undefined;
   if (!data?.noteId) return;
+  // A question push lands on Danas, not on the note: the ClarifyCard (with its tap-to-answer chips) lives
+  // there, and the note detail has no question UI at all.
+  if (data.kind === 'question') {
+    router.navigate('/');
+    return;
+  }
   router.push({ pathname: '/note/[id]', params: { id: data.noteId } });
 }
 
